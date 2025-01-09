@@ -51,7 +51,8 @@ dbpay = client['Payment']
 collectionpay = dbpay['accepted']
 dbpaid = client['Store']
 collectionpaid = dbpaid['details']
-
+dbrest = client['Restaurant']
+collectionrest = dbrest['payment-details']
 # Allowed file extensions for upload
 ALLOWED_EXTENSIONS = {'txt'}
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -182,30 +183,34 @@ def is_user_subscribed(email):
     print("i came here - 5")
 
     return {"error": "User has no active subscription."}, False
-
 def check_and_increment_count(email):
-    # First, check if the user is subscribed or on a free trial
+    # Check subscription status
     error_response, is_subscribed = is_user_subscribed(email)
+    print(f"Subscription status: {is_subscribed}, Error: {error_response}")
 
-    if not is_subscribed:
-        print("Subscription expired or not found.")
-        return error_response, False  # User is not subscribed, stop here
     if is_subscribed:
-        print("User is subscribed, proceed with free trial check.")
+        print("User is subscribed, proceed with operation.")
         return None, True
-    else:
+
+    elif not is_subscribed:
+        print("User is not subscribed, checking free trial count.")
         user = collection.find_one({"email": email})
         if user is None:
+            print("User not found in the database.")
             return {"error": "User not found"}, False
 
-        # Check the free trial count
         count = user.get("count", 0)
+        print(f"Free trial count: {count}")
+
         if count >= 5:
+            print("Free trial limit reached.")
             return {"error": "Free message limit reached. Please subscribe."}, False
 
         # Increment the count for free trial and update the user record
+        print("Incrementing free trial count.")
         collection.update_one({"email": email}, {"$inc": {"count": 1}})
         return None, True
+
 
 class GeminiAI:
     def __init__(self, api_key, model_name):
@@ -437,6 +442,7 @@ def upload_file():
         index.add(np.array(embeddings))
         print("1 ------------ upload")
         return jsonify({"message": "File processed and FAISS index created", "paragraphs": paragraphs})
+global_context = ""
 
 @app.route('/searchgeminirest', methods=['POST'])
 @token_required
@@ -458,13 +464,13 @@ def geminirest():
     print("4 ------------ question")
 
     closest_match = [paragraphs[idx] for idx in indices[0]]
-    context = "\n\n".join(closest_match)
+    global_context  = "\n\n".join(closest_match)
     print("5 ------------ question")
 
     chat_prompt = (
     f"You are a restaurant chatbot. Your purpose is to assist users with questions specifically related to restaurants, food, or food orders. "
     f"Do not answer questions that are unrelated to this context. Stay focused on restaurant and food-related topics.\n\n"
-    f"Here are 5 most relevant paragraphs for reference:\n\n{context}\n\n"
+    f"Here are 5 most relevant paragraphs for reference:\n\n{global_context}\n\n"
     f"Answer the following question based on this context: {query}. "
     f"If the user asks you to order any food, respond by suggesting complementary dishes to enhance their meal. For example:\n"
     f"- If the user orders biryani, suggest adding a sweet dish like gulab jamun or rasmalai.\n"
@@ -502,10 +508,13 @@ def restorder():
     print("5 ------------ question")
 
     chat_prompt = (
-    f"Determine if the following question contains any intent to order food. "
-    f"If the user wants to order food, return only a JSON object in the format {{'food': '<food mentioned by user>'}}. "
-    f"If no food order intent is present, return only the boolean value False. Do not add any other words or information: {query}"
-)
+        f"You are a restaurant chatbot focused on food orders. Use the following context to identify food order intent:\n\n{global_context}\n\n"
+        f"Determine if the following question contains any intent to order food. "
+        f"If the user wants to order food, return only a JSON object in the format {{'food': '<food mentioned by user>', 'price': <integer price of the food>}}. "
+        f"Do not mention any other words or add explanations. like ```json``` strictly. Only return the json formatted answer. "
+        f"If no food order intent is present, return only the boolean value False. Here is the Query sent by user: {query}"
+    )
+
 
     print("6 ------------ question")
 
@@ -864,6 +873,140 @@ def geminipaiduser():
     response = gemini_client.generate_response(chat_prompt)
 
     return jsonify({"answer": response})
+
+
+@app.route('/searchgeminilaw', methods=['POST'])
+def geminirestlaw():
+    print("1 ------------ question")
+
+    data = request.get_json()
+    query = data.get('query', '')
+    print("3 ------------ question")
+
+    chat_prompt = (
+            """
+        RESIDENTIAL RENTAL AGREEMENT
+        This agreement made at #city, #state on this #ddmmyy between #landlordname, residing at #landlordaddress1, #lordaddressline2, #lordcity, #lordstate, #lordpincode hereinafter referred to as the `LESSOR` of the One Part AND #tenantname, residing at  #tenantaddress1, #tenantaddressline2, #tencity, #tenstate, #tenpincode hereinafter referred to as the `LESSEE` of the other Part;
+        WHEREAS the Lessor is the lawful owner of, and otherwise well sufficiently entitled to #leasepropertyaddress1, #leaseaddressline2, #leasecity, #leasestate, #leasepincode falling in the category, #independenthouse / #apartment / #farmhouse / #residentialproperty and comprising of #xbedrooms, #xbathrooms, #xcarparks with an extent of #xxxxsquarefeet hereinafter referred to as the `said premises`. 
+        AND WHEREAS at the request of the Lessee, the Lessor has agreed to let the said premises to the tenant for a term of #leaseterm commencing from #leasestartdate in the manner hereinafter appearing. 
+
+        NOW THIS AGREEMENT WITNESSETH AND IT IS HEREBY AGREED BY AND BETWEEN THE PARTIES AS UNDER:
+        1.	That the Lessor hereby grants to the Lessee, the right to enter into use and remain in the said premises along with the existing fixtures and fittings listed in Annexure 1 to this Agreement and that the Lessee shall be entitled to peacefully possess, and enjoy possession of the said premises, and the other rights herein.
+        2.	That the lease hereby granted shall, unless cancelled earlier under any provision of this Agreement, remain in force for a period of #leaseterm. 
+        3.	That the Lessee will have the option to terminate this lease by giving #onemonthnotice in writing to the Lessor.
+        4.	That the Lessee shall have no right to create any sub-lease or assign or transfer in any manner the lease or give to anyone the possession of the said premises or any part thereof.
+        5.	That the Lessee shall use the said premises only for residential purposes.
+        6.	That the Lessor shall, before handing over the said premises, ensure the working of sanitary, electrical and water supply connections and other fittings pertaining to the said premises. It is agreed that it shall be the responsibility of the Lessor for their return in the working condition at the time of re-possession of the said premises (reasonable wear and tear and loss or damage by fire, flood, rains, accident, irresistible force or act of God excepted).
+        7.	That the Lessee is not authorized to make any alteration in the construction of the said premises. The Lessee may however install and remove his own fittings and fixtures, provided this is done without causing any excessive damage or loss to the said premises.
+        8.	That the day-to-day repair jobs such as fuse blow out, replacement of light bulbs/tubes, leakage of water taps, maintenance of the water pump and other minor repairs, etc., shall be effected by the Lessee at its own cost, and any major repairs, either structural or to the electrical or water connection, plumbing leaks, water seepage shall be attended to by the Lessor. In the event of the Lessor failing to carry out the repairs on receiving notice from the Lessee, the Lessee shall undertake the necessary repairs and the Lessor will be liable to immediately reimburse costs incurred by the Lessee.
+        9.	That the Lessor or its duly authorized agent shall have the right to enter into or upon the said premises or any part thereof at a mutually arranged convenient time for the purpose of inspection. 
+        10.	That the Lessee shall use the said premises along with its fixtures and fitting in careful and responsible manner and shall handover the premises to the Lessor in working condition (reasonable wear and tear and loss or damage by fire, flood, rains, accidents, irresistible force or act of God excepted).
+        11.	That in consideration of use of the said premises the Lessee agrees that he shall pay to the Lessor during the period of this agreement, a monthly rent at the rate of #monthlyrentalinnumber&words. The amount will be paid in advance on or before the date of #paiday of every English calendar month.
+        12.	It is hereby agreed that if default is made by the lessee in payment of the rent for a period of three months, or in observance and performance of any of the covenants and stipulations hereby contained and on the part to be observed and performed by the lessee, then on such default, the lessor shall be entitled in addition to or in the alternative to any other remedy that may be available to him at this discretion, to terminate the lease and eject the lessee from the said premises; and to take possession thereof as full and absolute owner thereof, provided that a notice in writing shall be given by the lessor to the lessee of his intention to terminate the lease and to take possession of the said premises. If the arrears of rent are paid or the lessee comply with or carry out the covenants and conditions or stipulations, within fifteen days from the service of such notice, then the lessor shall not be entitled to take possession of the said premises.
+        13.	That in addition to the compensation mentioned above, the Lessee shall pay the actual electricity, shared maintenance, water bills for the period of the agreement directly to the authorities concerned. The relevant `start date` meter readings are #startingmetereading. 
+        14.	That the Lessee has paid to the Lessor a sum of #rentaldepositinumber&words as deposit, free of interest, which the Lessor does accept and acknowledge. This deposit is for the due performance and observance of the terms and conditions of this Agreement. The deposit shall be returned to the Lessee simultaneously with the Lessee vacating the said premises. In the event of failure on the part of the Lessor to refund the said deposit amount to the Lessee as aforesaid, the Lessee shall be entitled to continue to use and occupy the said premises without payment of any rent until the Lessor refunds the said amount (without prejudice to the Lessee`s rights and remedies in law to recover the deposit).
+        15.	That the Lessor shall be responsible for the payment of all taxes and levies pertaining to the said premises including but not limited to House Tax, Property Tax, other cesses, if any, and any other statutory taxes, levied by the Government or Governmental Departments. During the term of this Agreement, the Lessor shall comply with all rules, regulations and requirements of any statutory authority, local, state and central government and governmental departments in relation to the said premises.
+        IN WITNESS WHEREOF, the parties hereto have set their hands on the day and year first hereinabove mentioned. 
+
+        Lessor,	Lessee,
+        #name	#name
+        # landlordaddress1	# tenantaddress1
+        #lordaddressline2	#tenantaddressline2
+        #lordcity, #lordstate, #lordpincode	#tencity, #tenstate, #tenpincode
+
+
+        WITNESS ONE	WITNESS TWO
+
+
+        [Name & Address]	[Name & Address]
+
+        ANNEXURE I
+        List of fixtures and fittings provided in #leasepropertyaddress1, #leaseaddressline2, #leasecity, #leasestate, #leasepincode: 
+        1.	#item1
+        2.	#item2
+        3.	#item3
+        """
+    f"You are an assistant tasked with filling out a Residential Rental Agreement based on the user's query. The agreement contains placeholders that need to be replaced with specific details from the user's input. The placeholders are as in #city like this, itll start with a # so you need to replace those fileds only and return the full aggremmentYour task is to process the following user query and extract the required information to replace the placeholders in the agreement accordingly. The query is: {query}"
+)
+
+    print("6 ------------ question")
+
+    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
+    model_name = 'gemini-1.5-flash-latest'
+    gemini_client = GeminiAI(api_key, model_name)
+    print("7 ------------ question")
+
+    response = gemini_client.generate_response(chat_prompt)
+    print("8 ------------ question")
+
+    return jsonify({"answer": response})
+@app.route('/create-order-rest', methods=['POST'])
+def create_order_rest():
+    try:
+        # Get data from the request (React frontend will send this)
+        data = request.json
+        user_email = data.get('email')
+        amount = data.get('amount')  # Amount in paise (sent from React)
+
+        if not amount or amount <= 0:
+            return jsonify({'error': 'Invalid amount'}), 400
+
+        # Create Razorpay order
+        order_data = {
+            "amount": amount,  # Amount in paise
+            "currency": "INR",
+            "receipt": f"receipt_{user_email}",
+        }
+        payment = razorpay_client.order.create(data=order_data)
+
+        # Save the order in MongoDB with status 'created'
+        collectionrest.insert_one({
+            "email": user_email,
+            "amount": amount,
+            "payment_id": payment['id'],
+            "status": "created",
+            "createAt": int(time.time()),
+        })
+
+        # Return the payment order details to React frontend
+        return jsonify(payment)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/verify-payment-rest', methods=['POST'])
+def verify_payment_rest():
+    try:
+        data = request.json
+        razorpay_payment_id = data.get('razorpay_payment_id')
+        razorpay_order_id = data.get('razorpay_order_id')
+        razorpay_signature = data.get('razorpay_signature')
+
+        # Verify the payment signature using HMAC SHA256
+        generated_signature = hmac.new(
+            bytes(razorpay_secret, 'utf-8'),
+            msg=bytes(razorpay_order_id + "|" + razorpay_payment_id, 'utf-8'),
+            digestmod=hashlib.sha256
+        ).hexdigest()
+
+        if generated_signature == razorpay_signature:
+            # Update the order status in MongoDB
+            collectionrest.update_one(
+                {"payment_id": razorpay_order_id},
+                {"$set": {
+                    "status": "successful",
+                    "razorpay_payment_id": razorpay_payment_id,
+                }}
+            )
+
+            return jsonify({'status': 'Payment verified successfully'})
+        else:
+            # Signature mismatch, payment failed
+            return jsonify({'error': 'Signature verification failed'}), 400
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

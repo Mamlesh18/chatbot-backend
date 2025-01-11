@@ -13,6 +13,7 @@ import smtplib
 import random
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 
 app = Flask(__name__)
@@ -49,7 +50,10 @@ def token_required(f):
     return decorated
 
 
+@app.route('/metrics')
+def metrics_route():
 
+    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 # Function to generate a random 64-bit key
 def generate_random_key(length=64):
 

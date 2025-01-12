@@ -1,7 +1,0 @@
-Flask==2.1.0
-Flask-Cors==3.0.10
-crawl4ai==1.0.0  # Adjust the version based on the actual package
-faiss-cpu==1.7.2
-sentence-transformers==2.2.0
-numpy==1.23.5
-openai==0.27.0  # Adjust version for AzureOpenAI compatibility

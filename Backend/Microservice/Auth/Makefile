@@ -11,3 +11,4 @@ all:
 	make deploy
 	make remove
 	make run
+	docker run -p 5000:5000 --network my_networkmamlesh/chatterpy-auth:latest

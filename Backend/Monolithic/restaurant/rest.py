@@ -41,7 +41,7 @@ CORS(app)
 # Initialize global variables for FAISS index and content
 index = None
 paragraphs = []
-model = SentenceTransformer('all-MiniLM-L6-v2')
+model = SentenceTransformer('local_model_dir')
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  # Replace with your own secret key
 
@@ -668,12 +668,12 @@ def upload_file_paid():
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
+
     email = request.form.get('email')  # Extract email from form data
     print(email)
-    
+    print(file.filename)
     if not is_user_paidsubscribed(email):
-        return jsonify({'error': 'Subscribe to access this'})
-    
+        return jsonify({'error':'subscribe to access this'})
     if file.filename == '' or not email:
         return jsonify({'error': 'No file selected or email missing'}), 400
 
@@ -681,52 +681,54 @@ def upload_file_paid():
         try:
             # Read the file content in memory (without saving it to disk)
             file_content = file.read().decode('utf-8', errors='ignore')
-            
+
             # Debugging log to check the file content
             print(f"File content: {file_content}")
 
             # Split the content into paragraphs
             paragraphs = file_content.split("\n\n")
 
-            # Create embeddings for each paragraph
+            # Create embeddings for each paragraph and initialize FAISS index
             embeddings = model.encode(paragraphs)
+       
+
             embeddings_list = embeddings.tolist()
+            print("here it is -------->", embeddings_list)
 
-            # Debug log for embeddings
-            print("Embeddings:", embeddings_list)
-            current_time_seconds = time.time()
-            current_time_nanoseconds = int(current_time_seconds * 1e9)
-
-            # Store or update data in Redis
-            record = {
-                    'email': email,
-                    'embeddings': embeddings_list,
-                    'paragraphs' : paragraphs,
-                    'lastUsed': current_time_nanoseconds
-                }
-           
+            # Check if the email already exists in the MongoDB collection
             existing_record = collectionpaid.find_one({'email': email})
+
             if existing_record:
                 # If email exists, update the file content and embeddings
                 collectionpaid.update_one(
                     {'email': email},
                     {'$set': {
+                        'file_content': file_content,
                         'embeddings': embeddings_list,
-                        'paragraphs' : paragraphs,
-                        'lastUsed': current_time_nanoseconds
+                        'paragraphs' : paragraphs
                     }}
                 )
                 return jsonify({'message': 'File updated and re-indexed successfully'}), 200
             else:
+                # If email does not exist, insert a new record
+                record = {
+                    'email': email,
+                    'file_content': file_content,
+                    'embeddings': embeddings_list,
+                    'paragraphs' : paragraphs
 
+
+                }
                 collectionpaid.insert_one(record)
-            
-            return jsonify({'message': 'File uploaded and indexed successfully'}), 200
+                return jsonify({'message': 'File uploaded and indexed successfully'}), 200
 
         except Exception as e:
             return jsonify({'error': f'An error occurred: {str(e)}'}), 500
     else:
         return jsonify({'error': 'Invalid file type. Only .txt files are allowed'}), 400
+
+
+
 
 
 @app.route('/searchgeminipaid', methods=['POST'])
@@ -735,9 +737,8 @@ def geminipaid():
     email = data.get('email')    
     query = data.get('query', '')
     print(email)
-
     if not is_user_paidsubscribed(email):
-        return jsonify({'error': 'Subscribe to access this'})
+        return jsonify({'error':'subscribe to access this'})
 
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -745,59 +746,47 @@ def geminipaid():
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    # Fetch the user's record from Redis
+    # Fetch the user's record from MongoDB to get the embeddings and paragraphs
     user_record = collectionpaid.find_one({"email": email})
     if not user_record:
         return jsonify({"error": "User not found"}), 400
+    print("1")
     embeddings_list = user_record.get('embeddings')
     print("2")
 
     paragraphs = user_record.get('paragraphs')
     print("3")
 
-    user_data = redis_client.get(email)
-    if user_data:
-        user_record = json.loads(user_data)
-    
-    else:
-        user_record = collectionpaid.find_one({"email": email})
-        if not user_record:
-            return jsonify({"error": "User not found"}), 400
-        current_time_nanoseconds = int(time.time() * 1e9)  # Current timestamp in nanoseconds
-        collectionpaid.update_one(
-        {"email": email},
-        {"$set": {"lastUsed": current_time_nanoseconds}}
-        )
-        
-        # Store the data in Redis for future use
-        redis_client.set(email, json.dumps(user_record))
-
-    embeddings_list = user_record.get('embeddings')
-    paragraphs = user_record.get('paragraphs')
     if not embeddings_list:
         return jsonify({"error": "Embeddings not found for this user"}), 400
+    print("4")
 
     # Convert the embeddings list back to a numpy array
     embeddings = np.array(embeddings_list)
+    print("5")
 
     # Rebuild the FAISS index
     dimension = embeddings.shape[1]  # Get the dimension of the embeddings
     faiss_index = faiss.IndexFlatL2(dimension)  # Use L2 distance for similarity
     faiss_index.add(embeddings)  # Add embeddings to FAISS index
+    print("6")
 
     # Convert query to embeddings
     query_embedding = model.encode([query])
     _, indices = faiss_index.search(query_embedding, k=5)  # Get top 5 relevant paragraphs
+    print("7")
 
     # Extract the relevant paragraphs from the indices
     closest_match = [paragraphs[idx] for idx in indices[0]]
     context = "\n\n".join(closest_match)
+    print("8")
 
     # Generate the prompt for Gemini
     chat_prompt = (
         f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
         f"Answer the following question based on this context: {query}"
     )
+    print("10")
 
     # Create a Gemini AI client and get the response
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
@@ -806,6 +795,7 @@ def geminipaid():
     response = gemini_client.generate_response(chat_prompt)
 
     return jsonify({"answer": response})
+
 
 
 @app.route('/getapikey', methods=['POST'])

@@ -3,6 +3,8 @@ import random
 import string
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+import pickle
+import base64
 from flask import Flask, jsonify, request, send_file
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
@@ -668,56 +670,51 @@ def upload_file_paid():
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
-
     email = request.form.get('email')  # Extract email from form data
     print(email)
     print(file.filename)
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error':'subscribe to access this'})
+    
+    # if not is_user_paidsubscribed(email):
+    #     return jsonify({'error':'subscribe to access this'})
+    
     if file.filename == '' or not email:
         return jsonify({'error': 'No file selected or email missing'}), 400
 
     if file and allowed_file(file.filename):
         try:
-            # Read the file content in memory (without saving it to disk)
             file_content = file.read().decode('utf-8', errors='ignore')
-
-            # Debugging log to check the file content
             print(f"File content: {file_content}")
 
-            # Split the content into paragraphs
             paragraphs = file_content.split("\n\n")
-
-            # Create embeddings for each paragraph and initialize FAISS index
             embeddings = model.encode(paragraphs)
-       
 
-            embeddings_list = embeddings.tolist()
-            print("here it is -------->", embeddings_list)
+            dimension = embeddings.shape[1]
+            faiss_index = faiss.IndexFlatL2(dimension)
+            faiss_index.add(np.array(embeddings))
 
-            # Check if the email already exists in the MongoDB collection
+            # Serialize the FAISS index
+            faiss_binary = pickle.dumps(faiss_index)
+            faiss_base64 = base64.b64encode(faiss_binary).decode('utf-8')
+
+            # Check if the email already exists in MongoDB
             existing_record = collectionpaid.find_one({'email': email})
 
             if existing_record:
-                # If email exists, update the file content and embeddings
                 collectionpaid.update_one(
                     {'email': email},
                     {'$set': {
                         'file_content': file_content,
-                        'embeddings': embeddings_list,
-                        'paragraphs' : paragraphs
+                        'faiss_index': faiss_base64,
+                        'paragraphs': paragraphs
                     }}
                 )
                 return jsonify({'message': 'File updated and re-indexed successfully'}), 200
             else:
-                # If email does not exist, insert a new record
                 record = {
                     'email': email,
                     'file_content': file_content,
-                    'embeddings': embeddings_list,
-                    'paragraphs' : paragraphs
-
-
+                    'faiss_index': faiss_base64,
+                    'paragraphs': paragraphs
                 }
                 collectionpaid.insert_one(record)
                 return jsonify({'message': 'File uploaded and indexed successfully'}), 200
@@ -728,17 +725,14 @@ def upload_file_paid():
         return jsonify({'error': 'Invalid file type. Only .txt files are allowed'}), 400
 
 
-
-
-
 @app.route('/searchgeminipaid', methods=['POST'])
 def geminipaid():
-    data = request.json  # Use request.json to handle JSON payload
-    email = data.get('email')    
+    data = request.json
+    email = data.get('email')
     query = data.get('query', '')
-    print(email)
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error':'subscribe to access this'})
+
+    # if not is_user_paidsubscribed(email):
+    #     return jsonify({'error':'subscribe to access this'})
 
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -746,47 +740,32 @@ def geminipaid():
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    # Fetch the user's record from MongoDB to get the embeddings and paragraphs
     user_record = collectionpaid.find_one({"email": email})
     if not user_record:
         return jsonify({"error": "User not found"}), 400
-    print("1")
-    embeddings_list = user_record.get('embeddings')
-    print("2")
 
     paragraphs = user_record.get('paragraphs')
-    print("3")
+    faiss_base64 = user_record.get('faiss_index')
 
-    if not embeddings_list:
-        return jsonify({"error": "Embeddings not found for this user"}), 400
-    print("4")
+    if not faiss_base64:
+        return jsonify({"error": "FAISS index not found for this user"}), 400
 
-    # Convert the embeddings list back to a numpy array
-    embeddings = np.array(embeddings_list)
-    print("5")
-
-    # Rebuild the FAISS index
-    dimension = embeddings.shape[1]  # Get the dimension of the embeddings
-    faiss_index = faiss.IndexFlatL2(dimension)  # Use L2 distance for similarity
-    faiss_index.add(embeddings)  # Add embeddings to FAISS index
-    print("6")
+    # Deserialize the FAISS index
+    faiss_binary = base64.b64decode(faiss_base64)
+    faiss_index = pickle.loads(faiss_binary)
 
     # Convert query to embeddings
     query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)  # Get top 5 relevant paragraphs
-    print("7")
+    _, indices = faiss_index.search(query_embedding, k=5)
 
-    # Extract the relevant paragraphs from the indices
+    # Extract the relevant paragraphs
     closest_match = [paragraphs[idx] for idx in indices[0]]
     context = "\n\n".join(closest_match)
-    print("8")
 
-    # Generate the prompt for Gemini
     chat_prompt = (
         f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
         f"Answer the following question based on this context: {query}"
     )
-    print("10")
 
     # Create a Gemini AI client and get the response
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"

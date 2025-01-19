@@ -898,7 +898,7 @@ def geminipaiduser():
 
 
 @app.route('/searchgeminilaw', methods=['POST'])
-def geminirestlaw():
+def geminirest():
     print("1 ------------ question")
 
     data = request.get_json()
@@ -906,7 +906,7 @@ def geminirestlaw():
     print("3 ------------ question")
 
     chat_prompt = (
-            """
+     """
         RESIDENTIAL RENTAL AGREEMENT
         This agreement made at #city, #state on this #ddmmyy between #landlordname, residing at #landlordaddress1, #lordaddressline2, #lordcity, #lordstate, #lordpincode hereinafter referred to as the `LESSOR` of the One Part AND #tenantname, residing at  #tenantaddress1, #tenantaddressline2, #tencity, #tenstate, #tenpincode hereinafter referred to as the `LESSEE` of the other Part;
         WHEREAS the Lessor is the lawful owner of, and otherwise well sufficiently entitled to #leasepropertyaddress1, #leaseaddressline2, #leasecity, #leasestate, #leasepincode falling in the category, #independenthouse / #apartment / #farmhouse / #residentialproperty and comprising of #xbedrooms, #xbathrooms, #xcarparks with an extent of #xxxxsquarefeet hereinafter referred to as the `said premises`. 
@@ -948,7 +948,7 @@ def geminirestlaw():
         2.	#item2
         3.	#item3
         """
-    f"You are an assistant tasked with filling out a Residential Rental Agreement based on the user's query. The agreement contains placeholders that need to be replaced with specific details from the user's input. The placeholders are as in #city like this, itll start with a # so you need to replace those fileds only and return the full aggremmentYour task is to process the following user query and extract the required information to replace the placeholders in the agreement accordingly. The query is: {query}"
+        f"You are an assistant tasked with filling out a Residential Rental Agreement based on the user's query. The agreement contains placeholders that need to be replaced with specific details from the user's input. The placeholders are as in #city like this, itll start with a # so you need to replace those fileds only and return the full aggremmentYour task is to process the following user query and extract the required information to replace the placeholders in the agreement accordingly. If any field s missing raise a question to user about please provide that specific field The query is: {query}"
 )
 
     print("6 ------------ question")
@@ -960,8 +960,14 @@ def geminirestlaw():
 
     response = gemini_client.generate_response(chat_prompt)
     print("8 ------------ question")
+    if isinstance(response, str):
 
-    return jsonify({"answer": response})
+        points = response.split('\n')  # Split by new lines or you can use regex for better splitting
+        # Clean up each point (remove extra spaces)
+        points = [point.strip() for point in points if point.strip()]
+
+    return jsonify({"answer": points})
+
 @app.route('/create-order-rest', methods=['POST'])
 def create_order_rest():
     try:

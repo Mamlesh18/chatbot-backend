@@ -1,6 +1,7 @@
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, Response
+
 from datetime import datetime, timedelta
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -11,7 +12,7 @@ from functools import wraps
 import json
 import google.generativeai as genai
 from prometheus_flask_exporter import PrometheusMetrics
-
+import time
 
 
 app = Flask(__name__)
@@ -32,6 +33,10 @@ app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  # Replace with yo
 client = MongoClient(uri, server_api=ServerApi('1'))
 ALLOWED_EXTENSIONS = {'txt'}
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+
+dbrest = client['Restaurant']
+collectionrest = dbrest['payment-details']
+collectionorders = dbrest['orders']
 
 @app.route('/metrics')
 def metrics_route():
@@ -57,6 +62,20 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
+
+class GeminiAI:
+    def __init__(self, api_key, model_name):
+        self.api_key = api_key
+        self.model_name = model_name
+        genai.configure(api_key=self.api_key)
+
+    def generate_response(self, prompt):
+        try:
+            model = genai.GenerativeModel(self.model_name)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"Error occurred: {e}"
 @app.route('/uploadfile', methods=['POST'])
 @token_required
 def upload_file():
@@ -90,19 +109,6 @@ def upload_file():
         return jsonify({"message": "File processed and FAISS index created", "paragraphs": paragraphs})
 global_context = ""
 
-class GeminiAI:
-    def __init__(self, api_key, model_name):
-        self.api_key = api_key
-        self.model_name = model_name
-        genai.configure(api_key=self.api_key)
-
-    def generate_response(self, prompt):
-        try:
-            model = genai.GenerativeModel(self.model_name)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"Error occurred: {e}"
 @app.route('/searchgeminirest', methods=['POST'])
 @token_required
 def geminirest():
@@ -197,5 +203,42 @@ def restorder():
 
         return jsonify({"answer": response}) 
     
+
+# SSE Route for streaming updates to the client
+@app.route('/stream-updates')
+def stream_updates():
+    email = request.args.get('email')  # Get email from query parameters
+    if not email:
+        return Response("data: {}\n\n", content_type='text/event-stream')
+
+    def stream():
+        latest_data = list(collectionorders.find({'email': email}, {"_id": 0}))
+        while True:
+            time.sleep(2)  # Check for updates every 2 seconds
+            current_data = list(collectionorders.find({'email': email}, {"_id": 0}))
+            if current_data != latest_data:  # If new data is found
+                latest_data = current_data
+                yield f"data: {json.dumps(latest_data)}\n\n"  # Send updated data as SSE
+
+    return Response(stream(), content_type='text/event-stream')
+
+# REST API to fetch all data
+@app.route('/get-all-orders', methods=['GET'])
+def get_all_orders():
+    try:
+        email = request.args.get('email')  # Get email from query parameters
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        # Find orders by email
+        orders = list(collectionorders.find({'email': email}, {"_id": 0}))
+
+        if not orders:
+            return jsonify([]), 200
+
+        return jsonify(orders)    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5000)

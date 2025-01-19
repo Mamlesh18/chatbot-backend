@@ -24,6 +24,8 @@ dbpay = client['Payment']
 collectionpay = dbpay['accepted']
 dbrest = client['Restaurant']
 collectionrest = dbrest['payment-details']
+collectionorders = dbrest['orders']
+
 
 @app.route('/metrics')
 def metrics_route():
@@ -135,6 +137,7 @@ def create_order_rest():
         # Get data from the request (React frontend will send this)
         data = request.json
         user_email = data.get('email')
+
         amount = data.get('amount')  # Amount in paise (sent from React)
 
         if not amount or amount <= 0:
@@ -162,8 +165,6 @@ def create_order_rest():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
 @app.route('/verify-payment-rest', methods=['POST'])
 def verify_payment_rest():
     try:
@@ -171,7 +172,9 @@ def verify_payment_rest():
         razorpay_payment_id = data.get('razorpay_payment_id')
         razorpay_order_id = data.get('razorpay_order_id')
         razorpay_signature = data.get('razorpay_signature')
-
+        food_items = data.get('food', [])  # Get the food array from the request
+        email = data.get('email')
+        print(email)
         # Verify the payment signature using HMAC SHA256
         generated_signature = hmac.new(
             bytes(razorpay_secret, 'utf-8'),
@@ -180,6 +183,11 @@ def verify_payment_rest():
         ).hexdigest()
 
         if generated_signature == razorpay_signature:
+            # Format the food details
+            food_names = [item['name'] for item in food_items]
+            food_costs = [item['price'] for item in food_items]
+            created_at = int(time.time())
+
             # Update the order status in MongoDB
             collectionrest.update_one(
                 {"payment_id": razorpay_order_id},
@@ -188,6 +196,15 @@ def verify_payment_rest():
                     "razorpay_payment_id": razorpay_payment_id,
                 }}
             )
+
+            # Insert the formatted data into the database
+            collectionorders.insert_one({
+                "email": email,
+                "food": food_names,
+                "cost": food_costs,
+                "createdAt": created_at,
+            
+            })
 
             return jsonify({'status': 'Payment verified successfully'})
         else:

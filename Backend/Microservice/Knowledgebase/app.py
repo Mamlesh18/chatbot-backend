@@ -2,12 +2,10 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import redis
 from flask import Flask, jsonify, request, send_file
-from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from crawl4ai import WebCrawler
 import faiss
 from functools import wraps
-import json
 import jwt
 import os
 import time
@@ -21,7 +19,6 @@ import google.generativeai as genai
 app = Flask(__name__)
 # Initialize Prometheus metrics
 metrics = PrometheusMetrics(app, defaults_prefix='my_app')
-redis_client = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
 
 # Enable CORS for all routes
@@ -69,11 +66,8 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
-
-# Check if the file extension is allowed
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
+scraped_data_dict = {}
+temporary_storage = {}
 # Step 1: Extract full links synchronously
 @app.route('/extractlinks', methods=['POST'])
 @token_required
@@ -90,29 +84,34 @@ def extract_full_links():
     
     return jsonify({"links": full_links})
 
-# Step 2: Process the selected links and store content as a single string
+# Step 2: Process the selected links and store content in a dictionary
 @app.route('/process-links', methods=['POST'])
 @token_required
 def process_links():
-    global index, paragraphs  # Make the content global for FAISS indexing
+    global scraped_data_dict  # Store scraped data globally for each email
 
     data = request.get_json()
+    email = request.headers.get('email')
+    if not email:
+        return jsonify({'message': 'Email not provided'}), 400
+
+    if email not in scraped_data_dict:
+        scraped_data_dict[email] = {'paragraphs': "", 'index': None}
+
     selected_links = data.get('selected_links', [])
-    
     crawler = WebCrawler()
     crawler.warmup()
 
-    content = []
+    # Process each link and append its content directly to paragraphs
     for link in selected_links:
         result = crawler.run(url=link)
-        content.append(result.markdown)
-    
-    paragraphs = "\n\n".join(content)  # Store content as a single string
+        scraped_data_dict[email]['paragraphs'] += f"{result.markdown}\n\n"
 
+    paragraphs = scraped_data_dict[email]['paragraphs'].strip()  # Remove trailing newlines
     if not paragraphs:
-        return jsonify({"message": "No content to index"})
+        return jsonify({"message": "No content to index"}), 400
 
-    # Split paragraphs into list for indexing
+    # Split paragraphs into a list for indexing
     paragraph_list = paragraphs.split("\n\n")
     embeddings = model.encode(paragraph_list)
     dimension = embeddings.shape[1]
@@ -121,20 +120,35 @@ def process_links():
     index = faiss.IndexFlatL2(dimension)
     index.add(np.array(embeddings))
 
-    # Write the content to a .txt file
-    txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
-    with open(txt_file_path, 'w', encoding='utf-8') as f:
-        f.write(paragraphs)
+    # Update the index in the dictionary
+    scraped_data_dict[email]['index'] = index
 
-    return jsonify({"message": "FAISS index created", "paragraphs": paragraph_list, "file_path": "/download-scraped-data"})
+ 
 
+    return jsonify({
+        "message": "FAISS index created",
+    })
 
 @app.route('/download-scraped-data', methods=['GET'])
 def download_scraped_data():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({'message': 'Email not provided'}), 400
+
+    # Check if the email exists in the dictionary
+    if email not in scraped_data_dict or 'paragraphs' not in scraped_data_dict[email]:
+        return jsonify({"message": "No data found for this email"}), 404
+
+    # Get the scraped paragraphs for the email
+    paragraphs = scraped_data_dict[email]['paragraphs']
+    
+    # Create a temporary .txt file from the paragraphs
     txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
-    if os.path.exists(txt_file_path):
-        return send_file(txt_file_path, as_attachment=True)
-    return jsonify({"message": "File not found"}), 404
+    with open(txt_file_path, 'w') as f:
+        f.write(paragraphs)
+
+    return send_file(txt_file_path, as_attachment=True)
+
 
 def is_user_subscribed(email):
     # Get the user subscription from the payment collection
@@ -207,15 +221,9 @@ class GeminiAI:
             return response.text
         except Exception as e:
             return f"Error occurred: {e}"
-        
 @app.route('/searchgemini', methods=['POST'])
 @token_required
 def gemini():
-    global index, paragraphs
-
-    if not index:
-        return jsonify({"message": "FAISS index not created"})
-
     data = request.get_json()
     query = data.get('query', '')
     email = request.headers.get('Email')
@@ -223,7 +231,18 @@ def gemini():
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    # Check user's message count and increment if under the limit
+    # Check if the email has scraped data
+    if email not in scraped_data_dict:
+        return jsonify({"error": "No scraped data found for this email"}), 404
+
+    # Retrieve the paragraphs and index for the given email
+    user_data = scraped_data_dict[email]
+    paragraphs = user_data.get('paragraphs', '')
+    index = user_data.get('index', None)
+
+    if not index:
+        return jsonify({"message": "FAISS index not created"}), 400
+
     # Check user's message count and increment if under the limit
     error, success = check_and_increment_count(email)
     if not success:
@@ -241,224 +260,13 @@ def gemini():
         f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
         f"Answer the following question based on this context: {query}"
     )
-    
+
     # Replace this with your actual Gemini API call
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
     gemini_client = GeminiAI(api_key, model_name)
     response = gemini_client.generate_response(chat_prompt)
     
-    return jsonify({"answer": response})
-
-
-def is_user_paidsubscribed(email):
-    # Get the user subscription from the payment collection
-    user_subscription = collectionpay.find_one({"email": email, "status": "successful"})
-    if user_subscription:
-        last_date = user_subscription.get("LastDate", 0)  
-        current_time = int(time.time()) 
-  
-        
-        if current_time > last_date:
-
-            return {"error": "Subscription has expired. Please re-subscribe."}, False
-        
-
-
-        return None, True
-
-
-    return {"error": "User has no active subscription."}, False
-
-@app.route('/uploadpaid', methods=['POST'])
-def upload_file_paid():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-
-    file = request.files['file']
-    email = request.form.get('email')  # Extract email from form data
-    print(email)
-    print(file.filename)
-    
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error': 'Subscribe to access this'})
-    
-    if file.filename == '' or not email:
-        return jsonify({'error': 'No file selected or email missing'}), 400
-
-    if file and allowed_file(file.filename):
-        try:
-            # Read the file content in memory (without saving it to disk)
-            file_content = file.read().decode('utf-8', errors='ignore')
-            
-            # Debugging log to check the file content
-            print(f"File content: {file_content}")
-
-            # Split the content into paragraphs
-            paragraphs = file_content.split("\n\n")
-
-            # Create embeddings for each paragraph
-            embeddings = model.encode(paragraphs)
-            embeddings_list = embeddings.tolist()
-
-            # Debug log for embeddings
-            print("Embeddings:", embeddings_list)
-
-            # Store or update data in Redis
-            record = {
-                'embeddings': embeddings_list,
-                'paragraphs': paragraphs
-            }
-            
-            # Convert the record to JSON and store in Redis using email as the key
-            redis_client.set(email, json.dumps(record))
-
-            return jsonify({'message': 'File uploaded and indexed successfully'}), 200
-
-        except Exception as e:
-            return jsonify({'error': f'An error occurred: {str(e)}'}), 500
-    else:
-        return jsonify({'error': 'Invalid file type. Only .txt files are allowed'}), 400
-
-
-@app.route('/searchgeminipaid', methods=['POST'])
-def geminipaid():
-    data = request.json  # Use request.json to handle JSON payload
-    email = data.get('email')    
-    query = data.get('query', '')
-    print(email)
-
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error': 'Subscribe to access this'})
-
-    if not query:
-        return jsonify({"error": "Query not provided"}), 400
-
-    if not email:
-        return jsonify({"error": "Email not provided"}), 400
-
-    # Fetch the user's record from Redis
-    user_data = redis_client.get(email)
-    if not user_data:
-        return jsonify({"error": "User not found"}), 400
-
-    # Deserialize the JSON data
-    user_record = json.loads(user_data)
-    embeddings_list = user_record.get('embeddings')
-    paragraphs = user_record.get('paragraphs')
-
-    if not embeddings_list:
-        return jsonify({"error": "Embeddings not found for this user"}), 400
-
-    # Convert the embeddings list back to a numpy array
-    embeddings = np.array(embeddings_list)
-
-    # Rebuild the FAISS index
-    dimension = embeddings.shape[1]  # Get the dimension of the embeddings
-    faiss_index = faiss.IndexFlatL2(dimension)  # Use L2 distance for similarity
-    faiss_index.add(embeddings)  # Add embeddings to FAISS index
-
-    # Convert query to embeddings
-    query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)  # Get top 5 relevant paragraphs
-
-    # Extract the relevant paragraphs from the indices
-    closest_match = [paragraphs[idx] for idx in indices[0]]
-    context = "\n\n".join(closest_match)
-
-    # Generate the prompt for Gemini
-    chat_prompt = (
-        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
-        f"Answer the following question based on this context: {query}"
-    )
-
-    # Create a Gemini AI client and get the response
-    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
-    model_name = 'gemini-1.5-flash-latest'
-    gemini_client = GeminiAI(api_key, model_name)
-    response = gemini_client.generate_response(chat_prompt)
-
-    return jsonify({"answer": response})
-
-
-@app.route('/getapikey', methods=['POST'])
-def get_apikey():
-    # Extract email from the POST request body
-    data = request.get_json()
-    email = data.get("email")
-
-    if not email:
-        return jsonify({"error": "Email is required"}), 400
-
-    # Find the user by email in the MongoDB collection
-    user = collection.find_one({"email": email})
-    print(email)
-    # print(user)
-    print(user["key"])
-    if user and "key" in user:
-        return jsonify({"key": user["key"]}), 200
-
-    return jsonify({"error": "API key not found for the user"}), 404
-
-
-@app.route('/searchgeminipaiduser', methods=['POST'])
-def geminipaiduser():
-    data = request.json  # Use request.json to handle JSON payload
-    email = data.get('email')    
-    query = data.get('query', '')
-    api_key = data.get('key','')
-    print(email)
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error':'subscribe to access this'})
-
-    if not query:
-        return jsonify({"error": "Query not provided"}), 400
-
-    if not email:
-        return jsonify({"error": "Email not provided"}), 400
-    
-    if not api_key:
-        return jsonify({"error": "Email not provided"}), 400
-
-    user_record = collectionpaid.find_one({"email": email})
-    if not user_record:
-        return jsonify({"error": "User not found"}), 400
-    embeddings_list = user_record.get('embeddings')
-
-    paragraphs = user_record.get('paragraphs')
-
-    if not embeddings_list:
-        return jsonify({"error": "Embeddings not found for this user"}), 400
-
-    # Convert the embeddings list back to a numpy array
-    embeddings = np.array(embeddings_list)
-
-    # Rebuild the FAISS index
-    dimension = embeddings.shape[1]  # Get the dimension of the embeddings
-    faiss_index = faiss.IndexFlatL2(dimension)  # Use L2 distance for similarity
-    faiss_index.add(embeddings)  # Add embeddings to FAISS index
-
-    # Convert query to embeddings
-    query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)  # Get top 5 relevant paragraphs
-    print("7")
-
-    # Extract the relevant paragraphs from the indices
-    closest_match = [paragraphs[idx] for idx in indices[0]]
-    context = "\n\n".join(closest_match)
-
-    # Generate the prompt for Gemini
-    chat_prompt = (
-        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
-        f"Answer the following question based on this context: {query}"
-    )
-
-    # Create a Gemini AI client and get the response
-    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
-    model_name = 'gemini-1.5-flash-latest'
-    gemini_client = GeminiAI(api_key, model_name)
-    response = gemini_client.generate_response(chat_prompt)
-
     return jsonify({"answer": response})
 
 

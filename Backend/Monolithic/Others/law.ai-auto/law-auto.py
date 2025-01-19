@@ -94,8 +94,13 @@ def geminirest():
 
     response = gemini_client.generate_response(chat_prompt)
     print("8 ------------ question")
+    if isinstance(response, str):
 
-    return jsonify({"answer": response})
+        points = response.split('\n')  # Split by new lines or you can use regex for better splitting
+        # Clean up each point (remove extra spaces)
+        points = [point.strip() for point in points if point.strip()]
+
+    return jsonify({"answer": points})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5000)

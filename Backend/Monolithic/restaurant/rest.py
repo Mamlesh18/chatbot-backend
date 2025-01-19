@@ -5,7 +5,7 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import pickle
 import base64
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, Response
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -43,7 +43,8 @@ CORS(app)
 # Initialize global variables for FAISS index and content
 index = None
 paragraphs = []
-model = SentenceTransformer('local_model_dir')
+model = None
+# model = SentenceTransformer('local_model_dir')
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  # Replace with your own secret key
 
@@ -59,6 +60,9 @@ dbpaid = client['Store']
 collectionpaid = dbpaid['details']
 dbrest = client['Restaurant']
 collectionrest = dbrest['payment-details']
+collectionorders = dbrest['orders']
+dbknow = client['Knowledgebase']
+collectionknow = dbknow['extract-details']
 # Allowed file extensions for upload
 ALLOWED_EXTENSIONS = {'txt'}
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -97,6 +101,8 @@ def protected():
 # Check if the file extension is allowed
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+scraped_data_dict = {}
+temporary_storage = {}
 
 # Step 1: Extract full links synchronously
 @app.route('/extractlinks', methods=['POST'])
@@ -114,29 +120,34 @@ def extract_full_links():
     
     return jsonify({"links": full_links})
 
-# Step 2: Process the selected links and store content as a single string
+# Step 2: Process the selected links and store content in a dictionary
 @app.route('/process-links', methods=['POST'])
 @token_required
 def process_links():
-    global index, paragraphs  # Make the content global for FAISS indexing
+    global scraped_data_dict  # Store scraped data globally for each email
 
     data = request.get_json()
+    email = request.headers.get('email')
+    if not email:
+        return jsonify({'message': 'Email not provided'}), 400
+
+    if email not in scraped_data_dict:
+        scraped_data_dict[email] = {'paragraphs': "", 'index': None}
+
     selected_links = data.get('selected_links', [])
-    
     crawler = WebCrawler()
     crawler.warmup()
 
-    content = []
+    # Process each link and append its content directly to paragraphs
     for link in selected_links:
         result = crawler.run(url=link)
-        content.append(result.markdown)
-    
-    paragraphs = "\n\n".join(content)  # Store content as a single string
+        scraped_data_dict[email]['paragraphs'] += f"{result.markdown}\n\n"
 
+    paragraphs = scraped_data_dict[email]['paragraphs'].strip()  # Remove trailing newlines
     if not paragraphs:
-        return jsonify({"message": "No content to index"})
+        return jsonify({"message": "No content to index"}), 400
 
-    # Split paragraphs into list for indexing
+    # Split paragraphs into a list for indexing
     paragraph_list = paragraphs.split("\n\n")
     embeddings = model.encode(paragraph_list)
     dimension = embeddings.shape[1]
@@ -145,20 +156,35 @@ def process_links():
     index = faiss.IndexFlatL2(dimension)
     index.add(np.array(embeddings))
 
-    # Write the content to a .txt file
-    txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
-    with open(txt_file_path, 'w', encoding='utf-8') as f:
-        f.write(paragraphs)
+    # Update the index in the dictionary
+    scraped_data_dict[email]['index'] = index
 
-    return jsonify({"message": "FAISS index created", "paragraphs": paragraph_list, "file_path": "/download-scraped-data"})
+ 
 
+    return jsonify({
+        "message": "FAISS index created",
+    })
 
 @app.route('/download-scraped-data', methods=['GET'])
 def download_scraped_data():
+    email = request.args.get('email')
+    if not email:
+        return jsonify({'message': 'Email not provided'}), 400
+
+    # Check if the email exists in the dictionary
+    if email not in scraped_data_dict or 'paragraphs' not in scraped_data_dict[email]:
+        return jsonify({"message": "No data found for this email"}), 404
+
+    # Get the scraped paragraphs for the email
+    paragraphs = scraped_data_dict[email]['paragraphs']
+    
+    # Create a temporary .txt file from the paragraphs
     txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
-    if os.path.exists(txt_file_path):
-        return send_file(txt_file_path, as_attachment=True)
-    return jsonify({"message": "File not found"}), 404
+    with open(txt_file_path, 'w') as f:
+        f.write(paragraphs)
+
+    return send_file(txt_file_path, as_attachment=True)
+
 
 def is_user_subscribed(email):
     # Get the user subscription from the payment collection
@@ -231,23 +257,28 @@ class GeminiAI:
             return response.text
         except Exception as e:
             return f"Error occurred: {e}"
-        
 @app.route('/searchgemini', methods=['POST'])
 @token_required
 def gemini():
-    global index, paragraphs
-
-    if not index:
-        return jsonify({"message": "FAISS index not created"})
-
     data = request.get_json()
     query = data.get('query', '')
     email = request.headers.get('Email')
-
+    
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    # Check user's message count and increment if under the limit
+    # Check if the email has scraped data
+    if email not in scraped_data_dict:
+        return jsonify({"error": "No scraped data found for this email"}), 404
+
+    # Retrieve the paragraphs and index for the given email
+    user_data = scraped_data_dict[email]
+    paragraphs = user_data.get('paragraphs', '')
+    index = user_data.get('index', None)
+
+    if not index:
+        return jsonify({"message": "FAISS index not created"}), 400
+
     # Check user's message count and increment if under the limit
     error, success = check_and_increment_count(email)
     if not success:
@@ -265,7 +296,7 @@ def gemini():
         f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
         f"Answer the following question based on this context: {query}"
     )
-    
+
     # Replace this with your actual Gemini API call
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
@@ -273,7 +304,7 @@ def gemini():
     response = gemini_client.generate_response(chat_prompt)
     
     return jsonify({"answer": response})
-# MongoDB connection URI
+
 
 
 # Function to generate a random 64-bit key
@@ -937,6 +968,7 @@ def create_order_rest():
         # Get data from the request (React frontend will send this)
         data = request.json
         user_email = data.get('email')
+
         amount = data.get('amount')  # Amount in paise (sent from React)
 
         if not amount or amount <= 0:
@@ -964,8 +996,6 @@ def create_order_rest():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
 @app.route('/verify-payment-rest', methods=['POST'])
 def verify_payment_rest():
     try:
@@ -973,7 +1003,9 @@ def verify_payment_rest():
         razorpay_payment_id = data.get('razorpay_payment_id')
         razorpay_order_id = data.get('razorpay_order_id')
         razorpay_signature = data.get('razorpay_signature')
-
+        food_items = data.get('food', [])  # Get the food array from the request
+        email = data.get('email')
+        print(email)
         # Verify the payment signature using HMAC SHA256
         generated_signature = hmac.new(
             bytes(razorpay_secret, 'utf-8'),
@@ -982,6 +1014,11 @@ def verify_payment_rest():
         ).hexdigest()
 
         if generated_signature == razorpay_signature:
+            # Format the food details
+            food_names = [item['name'] for item in food_items]
+            food_costs = [item['price'] for item in food_items]
+            created_at = int(time.time())
+
             # Update the order status in MongoDB
             collectionrest.update_one(
                 {"payment_id": razorpay_order_id},
@@ -991,6 +1028,15 @@ def verify_payment_rest():
                 }}
             )
 
+            # Insert the formatted data into the database
+            collectionorders.insert_one({
+                "email": email,
+                "food": food_names,
+                "cost": food_costs,
+                "createdAt": created_at,
+            
+            })
+
             return jsonify({'status': 'Payment verified successfully'})
         else:
             # Signature mismatch, payment failed
@@ -999,6 +1045,42 @@ def verify_payment_rest():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# SSE Route for streaming updates to the client
+@app.route('/stream-updates')
+def stream_updates():
+    email = request.args.get('email')  # Get email from query parameters
+    if not email:
+        return Response("data: {}\n\n", content_type='text/event-stream')
+
+    def stream():
+        latest_data = list(collectionorders.find({'email': email}, {"_id": 0}))
+        while True:
+            time.sleep(2)  # Check for updates every 2 seconds
+            current_data = list(collectionorders.find({'email': email}, {"_id": 0}))
+            if current_data != latest_data:  # If new data is found
+                latest_data = current_data
+                yield f"data: {json.dumps(latest_data)}\n\n"  # Send updated data as SSE
+
+    return Response(stream(), content_type='text/event-stream')
+
+# REST API to fetch all data
+@app.route('/get-all-orders', methods=['GET'])
+def get_all_orders():
+    try:
+        email = request.args.get('email')  # Get email from query parameters
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        # Find orders by email
+        orders = list(collectionorders.find({'email': email}, {"_id": 0}))
+
+        if not orders:
+            return jsonify([]), 200
+
+        return jsonify(orders)    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5000)

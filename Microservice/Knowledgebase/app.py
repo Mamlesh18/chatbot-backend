@@ -26,6 +26,7 @@ CORS(app)
 
 index = None
 paragraphs = []
+# model = None
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 
@@ -85,6 +86,7 @@ def extract_full_links():
     return jsonify({"links": full_links})
 
 # Step 2: Process the selected links and store content in a dictionary
+from concurrent.futures import ThreadPoolExecutor
 @app.route('/process-links', methods=['POST'])
 @token_required
 def process_links():
@@ -95,19 +97,33 @@ def process_links():
     if not email:
         return jsonify({'message': 'Email not provided'}), 400
 
-    if email not in scraped_data_dict:
-        scraped_data_dict[email] = {'paragraphs': "", 'index': None}
+    scraped_data_dict[email] = {'paragraphs': "", 'index': None}
 
     selected_links = data.get('selected_links', [])
     crawler = WebCrawler()
     crawler.warmup()
 
-    # Process each link and append its content directly to paragraphs
-    for link in selected_links:
-        result = crawler.run(url=link)
-        scraped_data_dict[email]['paragraphs'] += f"{result.markdown}\n\n"
+    def process_single_link(link):
+        try:
+            result = crawler.run(url=link)
+            if result and result.markdown:
+                return result.markdown
+            else:
+                return ""  # Return an empty string if result or result.markdown is None
+        except Exception as e:
+            print(f"Error processing link {link}: {e}")
+            return ""  # Return an empty string in case of an error
 
-    paragraphs = scraped_data_dict[email]['paragraphs'].strip()  # Remove trailing newlines
+    # Use a thread pool to process the links in parallel
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(process_single_link, selected_links)
+
+    # Filter out any empty results
+    results = [r for r in results if r]
+
+    paragraphs = "\n\n".join(results).strip()  # Combine results from all links
+    scraped_data_dict[email]['paragraphs'] = paragraphs
+
     if not paragraphs:
         return jsonify({"message": "No content to index"}), 400
 
@@ -122,8 +138,6 @@ def process_links():
 
     # Update the index in the dictionary
     scraped_data_dict[email]['index'] = index
-
- 
 
     return jsonify({
         "message": "FAISS index created",
@@ -144,11 +158,12 @@ def download_scraped_data():
     
     # Create a temporary .txt file from the paragraphs
     txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
-    with open(txt_file_path, 'w') as f:
+    
+    # Use 'utf-8' encoding to avoid encoding errors
+    with open(txt_file_path, 'w', encoding='utf-8') as f:
         f.write(paragraphs)
 
     return send_file(txt_file_path, as_attachment=True)
-
 
 def is_user_subscribed(email):
     # Get the user subscription from the payment collection
@@ -273,4 +288,4 @@ def gemini():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0',debug=True, port=5000)
+    app.run(host='0.0.0.0',debug=True, port=5001)

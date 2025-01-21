@@ -132,7 +132,7 @@ def login():
             "uuid": user['uuid'],
             "username": user['username'],
             "email": user['email'],
-            "exp": datetime.utcnow() + timedelta(hours=100)  # Token expires in 1 hour
+            "exp": datetime.utcnow() + timedelta(hours=1000)  # Token expires in 1 hour
         }
         token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm="HS256")
 

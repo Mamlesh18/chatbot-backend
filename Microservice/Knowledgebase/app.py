@@ -259,9 +259,9 @@ def gemini():
         return jsonify({"message": "FAISS index not created"}), 400
 
     # Check user's message count and increment if under the limit
-    error, success = check_and_increment_count(email)
-    if not success:
-        return jsonify(error), 403    # Forbidden when limit is reached
+    # error, success = check_and_increment_count(email)
+    # if not success:
+    #     return jsonify(error), 403    # Forbidden when limit is reached
 
     # Proceed with the regular FAISS search and response generation
     query_embedding = model.encode([query])

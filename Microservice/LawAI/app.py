@@ -36,7 +36,55 @@ class GeminiAI:
         except Exception as e:
             return f"Error occurred: {e}"
 
-@app.route('/v1/rental', methods=['POST'])
+@app.route('/v1/law', methods=['POST'])
+def lawai():
+    print("1 ------------ Received query")
+
+    # Get the user input from the request
+    data = request.get_json()
+    query = data.get('query', '')
+    print("2 ------------ Processing query")
+    chat_prompt = (
+    f"You are a legal document classifier. Your task is to identify the type of legal document based on the query provided. "
+    f"There are only three valid document types: 'rental', 'adoption', and 'sale deed'. "
+    f"Follow these rules strictly: "
+    f"1. If the document matches one of the three types, respond in JSON format as follows: {{\"document\": \"<type>\"}}, where <type> is 'rental', 'adoption', or 'sale deed'. "
+    f"2. If the document does not match any of the three types, respond strictly as: {{\"document\": \"False\"}}. "
+    f"3. Do not include any additional words, explanations, or formatting such as ```json```. "
+    f"Only return the exact JSON response as specified. "
+    f"Here is the query: {query}"
+)
+
+
+    # Configure Gemini AI
+    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
+    model_name = 'gemini-1.5-flash-latest'
+    gemini_client = GeminiAI(api_key, model_name)
+    print("3 ------------ Sending classification prompt")
+
+    # Get the classification response
+    response = gemini_client.generate_response(chat_prompt)
+    print(f"4 ------------ Classification response: {response}")
+
+    try:
+        # Parse the response
+        response_data = eval(response)  # Assuming the response is in JSON-like format (e.g., {'document': 'rental'})
+        document_type = response_data.get('document')
+
+        # Handle the classification result
+        if document_type == 'rental':
+            print("5 ------------ Document identified as rental, calling rentalai function")
+            return rentalai()
+        elif document_type == 'False':
+            print("6 ------------ Invalid document type")
+            return jsonify({"error": "Invalid document type. Please provide a valid query."})
+        else:
+            print(f"7 ------------ Document type not supported: {document_type}")
+            return jsonify({"error": f"Unsupported document type: {document_type}"})
+    except Exception as e:
+        print(f"8 ------------ Error occurred while processing response: {e}")
+        return jsonify({"error": f"Error occurred: {e}"})
+
 def rentalai():
     print("1 ------------ question")
 

@@ -368,8 +368,8 @@ def geminipaiduser():
     model_name = 'gemini-1.5-flash-latest'
     gemini_client = GeminiAI(api_key, model_name)
     response = gemini_client.generate_response(chat_prompt)
-    res,checkfood = checkorder(query)    
-    return jsonify({"answer": response,"checkfood":res})
+    checkfood = checkorder(query)    
+    return jsonify({"answer": response,"checkfood":checkfood})
 # Function to process the food order query
 import json
 
@@ -378,40 +378,32 @@ def checkorder(query):
         f"You are a restaurant chatbot focused on food orders.\n\n"
         f"Determine if the following question contains any intent to order food. "
         f"If the user wants to order food, return only a JSON object in the format {{'food': '<food mentioned by user>', 'price': <integer price of the food>}}. "
-        f"Do not mention any other words or add explanations. Strictly follow JSON format. "
+        f"Do not mention any other words or add explanations. like ```json``` strictly. Only return the json formatted answer. "
         f"If no food order intent is present, return only the boolean value False. Here is the Query sent by user: {query}"
     )
 
-    print("Processing query...")
 
-    # Gemini API setup
+    print("6 ------------ question")
+
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
     gemini_client = GeminiAI(api_key, model_name)
+    print("7 ------------ question")
 
-    print("Sending query to Gemini API...")
     response = gemini_client.generate_response(chat_prompt)
-    print("Response from Gemini API:", response)
+    print("8 ------------ question")
+    print("answer------------------------>>>>",response)
 
     try:
-        # Parse the response as JSON
+        # Attempt to parse the response into a proper JSON object
         parsed_response = json.loads(response)
+        print("answer 1------------------------>>>>",response)
 
-        # Ensure it matches the expected format
-        if isinstance(parsed_response, dict) and "food" in parsed_response and "price" in parsed_response:
-            checkfood = True
-        else:
-            raise ValueError("Response does not contain required fields.")
+        return parsed_response
     except json.JSONDecodeError:
-        # If parsing fails, check if the response explicitly says False
-        if response.strip() == "False":
-            parsed_response = False
-            checkfood = False
-        else:
-            raise ValueError("Unexpected response format.")
-    print("parse",parsed_response)
-    print("checkfood",checkfood)
-    return parsed_response, checkfood
+        print("answer 2------------------------>>>>",response)
+
+        return response
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5004)

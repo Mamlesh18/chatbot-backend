@@ -36,8 +36,8 @@ class GeminiAI:
         except Exception as e:
             return f"Error occurred: {e}"
 
-@app.route('/searchgeminilaw', methods=['POST'])
-def geminirest():
+@app.route('/v1/rental', methods=['POST'])
+def rentalai():
     print("1 ------------ question")
 
     data = request.get_json()
@@ -106,6 +106,220 @@ def geminirest():
         points = [point.strip() for point in points if point.strip()]
 
     return jsonify({"answer": points})
+
+
+
+@app.route('/v1/sale', methods=['POST'])
+def saleai():
+    print("1 ------------ question")
+
+    data = request.get_json()
+    query = data.get('query', '')
+    print("3 ------------ question")
+
+    chat_prompt = (
+     """SALE DEED
+        THIS DEED OF ABSOLUTE SALE IS EXECUTED AT CHENNAI ON THIS THE #datend  DAY OF #month #year BY:-
+        #vendorname, S/o. Mr. #vendorfathername, #vendorreligion, aged about #vendorage years, residing at #vendoraddress. (Aadhaar No: #vendoraadharnumber) [PAN No: #vendorpannumber) hereinafter called as the "VENDOR" which terms shall mean and include his legal representatives, heirs, assigns and nominees. 
+
+        AND
+        #purchasername, S/o. Mr. #purchaserfathername, #purchaserreligion, aged about #purchaserage years, residing at #purchaseraddress. (Aadhaar No: #purchaseraadharnumber) (PAN No: #purchaserpannumber), hereinafter called as the "PURCHASER" which term shall mean and include his respective heirs, legal representatives, executors and assigns.
+
+
+
+        WHEREAS, the VENDOR is the owner of #propertydetails
+        WHEREAS, the VENDOR is thus in absolute possession and enjoyment of the schedule property ever since the date of purchase which is free from encumbrances and his possession and enjoyment are evident from the records issued by the Government authorities.
+        WHEREAS except an equitable mortgage by Deposit of Title Deeds with M/s.Housing Development Finance Corporation Ltd. in Loan Account No. #ownerloanaccountnumber the outstanding sum payable towards the same being Rs.#loansumnumbers/- (Rupees #loansumwords), there are no other encumbrance such as any other mortgage, hypothecation, attachment or any claim of whatsoever nature over the property morefully described in Schedule hereunder.
+
+        WHEREAS the VENDOR who is in need of funds for the purpose of settling his liabilities, has decided to sell the property more fully described in the Schedule hereunder and the PURCHASER has offered to purchase the same for a total sale consideration of Rs.#saleamountnumbers/- (Rupees #saleamountwords Only) from the VENDOR more fully described in Schedule hereunder free from all encumbrances.
+
+
+
+        WHEREAS the VENDOR has offered to sell the #propertytobesold comprised in S.No.#propertyoldnumber Part and New S.No.#propertynewnumber as per patta no.#propertypattanumber situated at #propertyaddress, measuring an area of #propertyarea sq.ft #otherpropertiesforsale, for a total Sale consideration of Rs.#saleamountnumbers/- (Rupees #saleamountwords Only) free from all encumbrances, which offer has been accepted by the PURCHASER.
+        NOW THIS DEED OF ABSOLUTE SALE WITNESSETH: -
+
+        Pursuant to the above said recitals and in consideration of the PURCHASER having paid a sum of Rs.#saleamountnumbers/- (Rupees #saleamountwords Only) to the VENDOR in the following manner: -
+
+        1. A sum of Rs.#sumadvance1/- is paid as advance by way of #sum1mode1 dated #sum1mode1date bearing No.#sum1mode1number drawn on #sum1mode1bankname Bank, #sum1mode1bankbranch, in favour of the VENDOR.
+        2. Further payment of Rs.#sumadvance2/- is transferred by way of #sum2mode2 Transaction from the SB Account No.#sum2mode2number, #sum2mode2bankname Bank, #sum2mode2bankbranch to the VENDOR's account at #vendorbankname, #vendorbankbranch, bearing SB Account No. #vendorbanknumber.
+
+        3. Further payment of Rs.#sumadvance3/- is paid by  Purchaser by way of #sum3mode3 bearing #sum3mode3number drawn on #sum3mode3bankname, #sum3mode3bankbranch, in favour of the VENDOR.
+            
+        4. #furtherpaymentdetails
+        in all a total sum of Rs.#saleamountnumbers/- (Rupees #saleamountwords Only), the receipt of which sum in full the Vendor doth hereby admit and  acknowledge and hereby release the PURCHASER from any further payment thereof and the Vendor doth hereby convey, sell, grant and transfer to and unto the PURCHASER the said schedule mentioned property, more fully described in the schedule hereunder with all the rights, title and interest of the Vendor of the said property TO HAVE AND TO HOLD the same as absolute owner thereof, together with all easements, privileges or other benefits attached to the said land and enjoyed therewith.
+        THE VENDOR doth hereby declare and covenant with the PURCHASER that there are no encumbrances on the said schedule mentioned property and it is not subject matter of any suit, litigation or proceedings and there are no encumbrances, charges, liens, trusts, attachments, claims or demands, will or attachment, maintenance charges, whatsoever now subsisting on the said schedule mentioned property and it has not been offered or given as security or mortgage by any court, tribunal or revenue or other authorities.
+
+        THE VENDOR doth hereby declare and covenant with the PURCHASER that the Vendor shall and will at all times indemnify the PURCHASER against all claims and demands whatsoever in respect of the said schedule mentioned property and make good to the PURCHASER all losses, damages, costs and expenses which the PURCHASER may be put to, incur or suffer by reasons of any defect, deficiency in the title of the vendor to the property.
+
+        THE VENDOR doth hereby declare and covenant with the PURCHASER that he has put the PURCHASER in vacant possession of the said schedule mentioned property and the PURCHASER shall and may peacefully and quietly enter into, possess and enjoy the schedule mentioned property without any let or hindrance, interruption or disturbances from any other person lawfully claiming through or under him.
+
+        THE VENDOR doth hereby declare and covenant with the PURCHASER that he has paid all taxes due to the government till this day and all other taxes levied hereafter shall be borne by the PURCHASER only. 
+        THE VENDOR doth hereby agree and undertake to execute further deed or deeds as may be reasonably required to assure better and perfect title to the PURCHASER.
+        THE VENDOR further covenants with the PURCHASER that the Vendor shall at all times execute, register or cause to be done, executed and registered at the expense of the PURCHASER all such further acts or acts, deeds and things which the PURCHASER may reasonably require for more effectively assuring the title of the schedule property to the PURCHASER.
+        The VENDOR has put the PURCHASER in physical possession of the schedule mentioned property from this date.
+        THE PURCHASER can apply for mutation of records in his name in the Revenue Patta as regards his undivided share in the schedule mentioned property and as well mutate his name with the property register kept with the Corporation of Chennai and CMWSSB and also the electricity service connection with TNEB.
+        THE VENDOR has on this day delivered all the original documents and other relevant documents relating to the schedule mentioned property to the PURCHASER.
+        SCHEDULE
+        All that piece and parcel of #propertydetails and the Plot is bounded on the: -
+        NORTH BY	: Plot No.21	
+        SOUTH BY   : Plot No.23
+        EAST BY  	: 30 Feet wide road	
+        WEST BY	: Plot No.29	
+
+        Admeasuring
+        #directionalmeasurementsinfeet
+        together with a #propertydetails
+
+
+        The Market value of the above said property is Rs.#saleamountnumbers/- and stamp duty is paid accordingly.
+        IN WITNESS WHEREOF THE VENDOR AND THE PURCHASER HAVE PUT THEIR RESPECTIVE SIGNATURES ON THE DAY, MONTH AND YEAR FIRST ABOVE WRITTEN BEFORE THE WITNESSES
+
+        VENDOR                                                                                     PURCHASER
+
+        WITNESSES: 
+        #witness1name
+
+
+        #witness2name
+        """
+        f"You are an assistant tasked with filling out a SALE DEED  based on the user's query. The agreement contains placeholders that need to be replaced with specific details from the user's input. The placeholders are as in #city like this, itll start with a # so you need to replace those fileds only and return the full aggremmentYour task is to process the following user query and extract the required information to replace the placeholders in the agreement accordingly. If any field s missing raise a question to user about please provide that specific field The query is: {query}"
+)
+
+    print("6 ------------ question")
+
+    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
+    model_name = 'gemini-1.5-flash-latest'
+    gemini_client = GeminiAI(api_key, model_name)
+    print("7 ------------ question")
+
+    response = gemini_client.generate_response(chat_prompt)
+    print("8 ------------ question")
+    if isinstance(response, str):
+
+        points = response.split('\n')  # Split by new lines or you can use regex for better splitting
+        # Clean up each point (remove extra spaces)
+        points = [point.strip() for point in points if point.strip()]
+
+    return jsonify({"answer": points})
+
+
+
+@app.route('/v1/adoption', methods=['POST'])
+def adoptionai():
+    print("1 ------------ question")
+
+    data = request.get_json()
+    query = data.get('query', '')
+    print("3 ------------ question")
+
+    chat_prompt = (
+     """In the High Court of Judicature at #courtvenue
+        (Ordinary Original Civil Jurisdiction)
+        O.P. NO. #casenumber OF #caseyear
+        (In the matter of Juvenile Justice (Care and Protection of Children) Act, 2015 and 
+        (In the matter of Minor child #childname, born on #childdob, 
+        #childgender, #childreligion)
+        #petitionerfathername
+        Son of #petitionerparentnameoffather
+        #petitionermothername
+        Wife of #petitionerfathername
+
+        Both residing at 
+        #petitioneraddress                                                                     	…Petitioners
+        -Versus-
+        #respondentfathername
+        Son of #respondentparentnameoffather
+        G. Dhanalakshmi
+        Wife of #respondentfathername
+
+        Both residing at 
+        #respondentaddress                                        	                              …Respondents
+
+        Petition under sec. 56(2) of the Juvenile Justice (Care and Protection of Children) Act 2015 (as amended by Act 2 of 2016)
+
+        The above named Petitioners respectfully state as follows:
+        The First Petitioner is #petitionerfathername Son of #petitionerparentnameoffather, Indian #petitioner1religion, aged about #petitioner1age years, #petitioneraddress.
+        The Second Petitioner is #petitionermothername Wife of #petitionerfathername, Indian #petitioner2religion, aged about #petitioner2age years, #petitioneraddress.
+        The Address for service of all notices and processes on the Petitioners is that of their counsel #advocatename (#advocateenrollment) Advocate, having their office at #advocateoffice (Mobile: #advocatenumber).
+        The First Respondent is #respondentfathername Son of #respondentparentnameoffather, #respondent1religion, aged about #respondent1age years, residing at #respondentaddress.                                                                     …2…
+        -2-
+        The Second Respondent is #respondentmothername Wife of #respondentfathername, #respondent2religion, aged about #respondent2age years, residing at #respondentaddress.
+        The Address for service of all notices and processes on the Respondents is as same as stated above.
+        The First Petitioner and the Second Petitioner are the husband and wife.  Likewise the First Respondent and the Second Respondent are the husband and wife.
+        The Respondents gave birth of a #childgender child out of their legal wedlock on #respondentmarriagedate and christened the said #childgender child as "#childname".  The said minor #childgender child was born at #childhospitaladdress and the same was registered in Registration No.#childregistrationnumber dated #registrationdate, on the file of Corporation of Greater Chennai.  A Birth Certificate has been issued by the City Health Officer (i/c), Greater Chennai Corporation to that effect.
+        The Petitioners have no children and the possibility of them having any children in future does not exist given their age and medical history.
+        The Petitioners are desirous of adopting a child and approached the Respondents herein seeking to adopt their minor #childgender child "#childname" as their daughter.
+        The Respondents, taking into consideration of the friendship between the Petitioners and the Respondents had consented and expressed their agreement to give their minor #childgender child "#childname" in adoption to the Petitioners herein.
+        The Respondents herein had handed over the minor #childgender child "#childname" to the Petitioners on #handoverdate and the Petitioners had also adopted the said minor #childgender child in the presence of witnesses, friends and relatives.
+        The Petitioners and the Respondents herein had entered into an Adoption Deed dated #adoptiondate to that effect and through which the Respondents herein had admitted, accepted and acknowledged the Adoption of Minor #childgender Child "#childname" by the Petitioners herein.  Thus the Minor #childgender Child "#childname" was handed over by the Respondents herein to the Petitioners herein and the Petitioners herein had adopted the Minor #childgender Child "#childname" on #adoptiondate and taken care of the said Minor #childgender Child from that day onwards.
+        The Petitioners are wealthy and have sufficient source of income and properties, both movables and immovable to take care of the adopted minor child "#childname" in a good manner.                                                      …3… 
+        -3-
+        The paramount welfare of the adopted child "#childname" will be well considered by the Petitioners herein.  The Petitioners are Indian Christians and the Respondents are Hindus and the Petitioners are having capacity to adopt the child and they are willing to take the child on adoptions.  They are having sufficient means to bring up and maintain the minor #childgender child "#childname".  They are having every means to give proper and high education and favorable upbringing with the full right of succession and inheritance.
+        The Respondents state that the Adoption is only for the welfare of the Minor #childgender Child "#childname" for which they have not received any payment or any consideration.  From the birth of the said Minor #childgender Child "#childname", the Petitioners are nurturing the said Minor #childgender Child "#childname" as the guardian of the child.
+        The Petitioners state that the said Minor #childgender Child "#childname" is with the Petitioners from the date of adoption of the said child viz., #adoptiondate and the Petitioners are very affectionate and cordial towards the child and vice versa.  The child is also very much attached with them and moves with them as father and mother.  From the date of Adoption i.e., #adoptiondate, the Petitioners had been bringing up the said minor #childgender child "#childname", as their own bestowing the parental affection.
+        The Petitioners state that they are hale and healthy and do not suffer any diseases or infirmity.  Further to that, the parents of the said minor #childgender child #childname, the Respondents herein had already expressed their willingness to  give adoption of the minor #childgender child "#childname" to the petitioners and executed a Deed of Adoption dated #adoptiondate to that effect.
+        The Petitioners state that they do not have any adverse interest against the minor #childgender child "#childname".
+        The Petitioners state that the minor #childgender child "#childname" has not been adopted by any court.  The Petitioners state that the said minor #childgender Child "#childname" does not possess any property in her name.
+        The Petitioners state that they required Adoption through Court of Law as all Schools and other Educational Institutions, Banks and other Financial Institutions, Government officials & Departments, Passport Authorities demanded Adoption through Court of Law and for which these Petitioners have no other option but to approach this Hon'ble Court for the same.  
+        The Petitioners state that the cause of action for the petition to seeking permission for adoptions arose at Chennai on #permissiondate, when the minor #childgender child " #childname" born at #childhospitaladdress to the Respondents herein and on #adoptiondate, when the
+        …4…
+        -4-
+        Petitioners and the Respondents entered into a Deed of Adoption and thereby confirming the Adoption given by the Respondents to the Petitioners and admitting, accepting & acknowledging the Adoption by the Petitioners from the date of adoption of minor #childgender child "#childname" viz., #adoptiondate and, when the Petitioners adopted the above said minor #childgender child "#childname" from the Respondents and nurture the child as guardian and on all these days commencing from #residingdate, when the child is living with the Petitioners at #petitioneraddress from the date of adoption i.e., #adoptiondate and still living thereon as on date and subsequently, all falls within the jurisdiction of this Hon'ble Court.
+        The Petitioners state that this Hon'ble Court has jurisdiction to entertain the Petition since the above said minor #childgender child "#childname" resides at #petitioneraddress with the Petitioners from #residingdate, which falls within the jurisdiction of this Hon'ble Court.
+        The Petitioners pay a court fee of Rs.50/- under Article 11(l), Schedule - II of Tamil Nadu Court Fees and Suit Valuation Act, 1955.
+        The Petitioners respectfully pray that this Hon'ble court may be pleased to:-
+        Appoint the Petitioners as Parents of the person of the minor #childgender child "#childname" born on #permissiondate; and 
+        That the said minor #childgender child "#childname" shall be entitled for all the legal rights including the right of inheritance and succession as a natural born biological child shall have and render justice.
+        Dated at #place on this #todaydate
+        1)
+
+        2)
+        Counsel for Petitioners.                                                                     Petitioners
+        VERIFICATION
+        We (1) #petitionerfathername (2) #petitionermothername, the Petitioners herein do hereby verify that what has been stated above Paragraphs 1 to 25 are true and correct to the best of our knowledge and belief and nothing has been concealed.
+        Verified at #place on this #datetoday
+        1)
+
+        2)
+        Petitioners
+        …5…
+        -5-
+        LIST OF DOCUMENTS FILED ALONG WITH THIS PETITION:-
+        Voter Identity Card of the First Petitioner (Xerox).
+        Family Card of the Petitioners 2005 - 2009 (Xerox)
+        Aadhar Card of the First Petitioner (Xerox)
+        Aadhar Card of the Second Petitioner (Xerox)
+        Birth Certificate of the minor #childgender child "#childname" dated #childdob (Computer Generated Copy) 
+        Deed of Adoption entered between the Petitioners and the Respondents dated #adoptiondate (Original)
+        Dated at #place on this #datetoday
+
+
+
+        Counsel for petitioners
+
+
+
+
+        """
+        f"You are an assistant tasked with filling out a Adoption based on the user's query. The agreement contains placeholders that need to be replaced with specific details from the user's input. The placeholders are as in #city like this, itll start with a # so you need to replace those fileds only and return the full aggremmentYour task is to process the following user query and extract the required information to replace the placeholders in the agreement accordingly. If any field s missing raise a question to user about please provide that specific field The query is: {query}"
+)
+
+    print("6 ------------ question")
+
+    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
+    model_name = 'gemini-1.5-flash-latest'
+    gemini_client = GeminiAI(api_key, model_name)
+    print("7 ------------ question")
+
+    response = gemini_client.generate_response(chat_prompt)
+    print("8 ------------ question")
+    if isinstance(response, str):
+
+        points = response.split('\n')  # Split by new lines or you can use regex for better splitting
+        points = [point.strip() for point in points if point.strip()]
+
+    return jsonify({"answer": points})
+
 def update_document(city,state,date,landlordname,landlordaddress1,lordaddressline2,lordcity,lordstate,lordpincode,
         tenantname,tenantaddress1,tenantaddressline2,tencity,tenstate,tenpincode,leasepropertyaddress1,
         leaseaddressline2,leasecity,leasestate,leasepincode,category,xbedrooms,xbathrooms,xcarparks,

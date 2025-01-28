@@ -40,7 +40,7 @@ dbauth = client['auth']
 collectionAuth = dbauth['authenticator']
 
 
-ALLOWED_EXTENSIONS = {'txt'}
+ALLOWED_EXTENSIONS = {'txt','pdf'}
 
 @app.route('/metrics')
 def metrics_route():

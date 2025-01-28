@@ -1,5 +1,0 @@
-prometheus_flask_exporter==0.23.1
-prometheus_client==0.20.0
-Flask==3.0.3
-Flask-Cors==4.0.1
-google-generativeai== 0.8.3

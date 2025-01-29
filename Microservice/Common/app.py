@@ -3,7 +3,7 @@ from pymongo import MongoClient
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # Enable CORS for all routes done
 
 # MongoDB connection
 client = MongoClient('mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth')

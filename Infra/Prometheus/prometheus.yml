@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s 
+scrape_configs:
+  - job_name: 'my_app' 
+    static_configs:
+      - targets:
+          - 'localhost:5000' 
+          - 'localhost:5001' 
+          - 'localhost:5002'
+          - 'localhost:5003'
+          - 'localhost:5004' 

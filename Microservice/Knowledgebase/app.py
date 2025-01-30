@@ -1,6 +1,5 @@
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-import redis
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from crawl4ai import WebCrawler

@@ -67,6 +67,7 @@ def freeUserbase():
     email = data.get('email','')    
     query = data.get('query', '')
     api_key = data.get('key','')
+    model  = data.get('model','')
     
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -77,7 +78,15 @@ def freeUserbase():
     if not api_key:
         return jsonify({"error": "API not provided"}), 400
     
-    user_record = collectionVector.find_one({"email": email}) or collectionChatAI.find_one({"email": email})
+    if not model:
+        return jsonify({"error":"model not provided"}), 400
+    
+    if model == "knowledgebase":
+        user_record=collectionVector.find_one({"email": email})
+    elif model == "chatAI":
+        user_record=collectionChatAI.find_one({"email": email})
+    else:
+        return jsonify({"error":"model not found"}), 400
     if not user_record:
         return jsonify({"error": "User not found"}), 400
 
@@ -132,7 +141,72 @@ def paidUserBase():
     if not api_key:
         return jsonify({"error": "API not provided"}), 400
     
-    user_record = collectionVector.find_one({"email": email})
+    if model == "knowledgebase":
+        user_record=collectionVector.find_one({"email": email})
+    elif model == "chatAI":
+        user_record=collectionChatAI.find_one({"email": email})
+    else:
+        return jsonify({"error":"model not found"}), 400
+    if not user_record:
+        return jsonify({"error": "User not found"}), 400
+
+    paragraphs = user_record.get('paragraphs')
+    faiss_base64 = user_record.get('faiss_index')
+
+    if not faiss_base64 or not paragraphs:
+        return jsonify({"error": "FAISS index not found for this user"}), 400
+
+    faiss_binary = base64.b64decode(faiss_base64)
+    faiss_index = pickle.loads(faiss_binary)
+
+
+    query_embedding = model.encode([query])
+    _, indices = faiss_index.search(query_embedding, k=5)
+
+    paragraph_list = paragraphs.split("\n\n")
+    closest_match = [paragraph_list[idx] for idx in indices[0]]
+    context = "\n\n".join(closest_match)    
+    
+    chat_prompt = (
+        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
+        f"Answer the following question based on this context: {query}"
+    )
+
+    api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
+    model_name = 'gemini-1.5-flash-latest'
+    gemini_client = GeminiAI(api_key, model_name)
+    response = gemini_client.generate_response(chat_prompt)
+
+    return jsonify({"answer": response})
+
+
+
+@app.route('/v2/paid', methods=['POST'])
+def paid2UserBase():
+    data = request.json  
+
+    email = data.get('email','')    
+    query = data.get('query', '')
+    api_key = data.get('key','')
+
+    if not is_user_paidsubscribed(email):
+        return jsonify({'error':'subscribe to access this'})
+
+    if not query:
+        return jsonify({"error": "Query not provided"}), 400
+
+    if not email:
+        return jsonify({"error": "Email not provided"}), 400
+    
+    if not api_key:
+        return jsonify({"error": "API not provided"}), 400
+    
+    if model == "knowledgebase":
+        user_record=collectionVector.find_one({"email": email})
+    elif model == "chatAI":
+        user_record=collectionChatAI.find_one({"email": email})
+    else:
+        return jsonify({"error":"model not found"}), 400
     if not user_record:
         return jsonify({"error": "User not found"}), 400
 

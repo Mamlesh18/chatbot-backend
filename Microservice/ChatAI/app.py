@@ -30,14 +30,12 @@ model = SentenceTransformer('all-MiniLM-L6-v2')
 
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 client = MongoClient(uri, server_api=ServerApi('1'))
-app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  # Replace with your own secret key
+app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658' 
 
 
-db = client['ChatAI']
-collectionVector = db['vector']
-collectionPayment = db['payment']
-dbauth = client['auth']
-collectionAuth = dbauth['authenticator']
+db = client['ChatterPy']
+collectionChatAI = db['chatAI']
+collection = db['auth']
 
 
 ALLOWED_EXTENSIONS = {'txt','pdf'}
@@ -53,7 +51,7 @@ def token_required(f):
         token = request.headers.get('Authorization')
 
         if token and token.startswith('Bearer '):
-            token = token.split(' ')[1]  # Strip 'Bearer' from token
+            token = token.split(' ')[1]  
         else:
             return jsonify({'Alert!': 'Token is missing!'}), 401
 
@@ -67,7 +65,6 @@ def token_required(f):
     return decorated
 
 
-# Check if the file extension is allowed
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -87,39 +84,14 @@ class GeminiAI:
         except Exception as e:
             return f"Error occurred: {e}"
         
-
-def is_user_paidsubscribed(email):
-    # Get the user subscription from the payment collection
-    user_subscription = collectionPayment.find_one({"email": email, "status": "successful"})
-    if user_subscription:
-        last_date = user_subscription.get("LastDate", 0)  
-        current_time = int(time.time()) 
-  
-        
-        if current_time > last_date:
-
-            return {"error": "Subscription has expired. Please re-subscribe."}, False
-        
-
-
-        return None, True
-
-
-    return {"error": "User has no active subscription."}, False
-
-@app.route('/uploadpaid', methods=['POST'])
+@app.route('/v1/chatai/upload', methods=['POST'])
 def upload_file_paid():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
 
     file = request.files['file']
-    email = request.form.get('email')  # Extract email from form data
-    print(email)
-    print(file.filename)
-    
-    # if not is_user_paidsubscribed(email):
-    #     return jsonify({'error':'subscribe to access this'})
-    
+    email = request.form.get('email')  
+
     if file.filename == '' or not email:
         return jsonify({'error': 'No file selected or email missing'}), 400
 
@@ -135,18 +107,15 @@ def upload_file_paid():
             faiss_index = faiss.IndexFlatL2(dimension)
             faiss_index.add(np.array(embeddings))
 
-            # Serialize the FAISS index
             faiss_binary = pickle.dumps(faiss_index)
             faiss_base64 = base64.b64encode(faiss_binary).decode('utf-8')
 
-            # Check if the email already exists in MongoDB
-            existing_record = collectionVector.find_one({'email': email})
+            existing_record = collectionChatAI.find_one({'email': email})
 
             if existing_record:
-                collectionVector.update_one(
+                collectionChatAI.update_one(
                     {'email': email},
                     {'$set': {
-                        'file_content': file_content,
                         'faiss_index': faiss_base64,
                         'paragraphs': paragraphs
                     }}
@@ -155,11 +124,10 @@ def upload_file_paid():
             else:
                 record = {
                     'email': email,
-                    'file_content': file_content,
                     'faiss_index': faiss_base64,
                     'paragraphs': paragraphs
                 }
-                collectionVector.insert_one(record)
+                collectionChatAI.insert_one(record)
                 return jsonify({'message': 'File uploaded and indexed successfully'}), 200
 
         except Exception as e:
@@ -168,14 +136,12 @@ def upload_file_paid():
         return jsonify({'error': 'Invalid file type. Only .txt files are allowed'}), 400
 
 
-@app.route('/searchgeminipaid', methods=['POST'])
+@app.route('/v1/chatai/search', methods=['POST'])
 def geminipaid():
     data = request.json
     email = data.get('email')
     query = data.get('query', '')
 
-    # if not is_user_paidsubscribed(email):
-    #     return jsonify({'error':'subscribe to access this'})
 
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -183,7 +149,7 @@ def geminipaid():
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    user_record = collectionVector.find_one({"email": email})
+    user_record = collectionChatAI.find_one({"email": email})
     if not user_record:
         return jsonify({"error": "User not found"}), 400
 
@@ -193,15 +159,12 @@ def geminipaid():
     if not faiss_base64:
         return jsonify({"error": "FAISS index not found for this user"}), 400
 
-    # Deserialize the FAISS index
     faiss_binary = base64.b64decode(faiss_base64)
     faiss_index = pickle.loads(faiss_binary)
 
-    # Convert query to embeddings
     query_embedding = model.encode([query])
     _, indices = faiss_index.search(query_embedding, k=5)
 
-    # Extract the relevant paragraphs
     closest_match = [paragraphs[idx] for idx in indices[0]]
     context = "\n\n".join(closest_match)
 
@@ -210,7 +173,6 @@ def geminipaid():
         f"Answer the following question based on this context: {query}"
     )
 
-    # Create a Gemini AI client and get the response
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
     gemini_client = GeminiAI(api_key, model_name)
@@ -220,22 +182,34 @@ def geminipaid():
 
 
 
-@app.route('/getapikey', methods=['POST'])
+@app.route('/v1/chatai/getapikey', methods=['POST'])
 def get_apikey():
-    # Extract email from the POST request body
     data = request.get_json()
     email = data.get("email")
 
     if not email:
         return jsonify({"error": "Email is required"}), 400
 
-    # Find the user by email in the MongoDB collection
-    user = collectionAuth.find_one({"email": email})
-    print(email)
-    # print(user)
-    print(user["key"])
+    user = collection.find_one({"email": email})
+    
     if user and "key" in user:
         return jsonify({"key": user["key"]}), 200
+
+    return jsonify({"error": "API key not found for the user"}), 404
+
+
+@app.route('/v1/chatai/apiurl', methods=['POST'])
+def get_apiurl():
+    data = request.get_json()
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    user = collectionChatAI.find_one({"email": email})
+  
+    if user and "api_url" in user:
+        return jsonify({"api_url": user["api_url"]}), 200
 
     return jsonify({"error": "API key not found for the user"}), 404
 

@@ -2,8 +2,6 @@ from flask import Flask, jsonify, request, send_file
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from flask_cors import CORS
-from prometheus_flask_exporter import PrometheusMetrics
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import razorpay
 from datetime import datetime, timedelta
 import hmac
@@ -11,40 +9,29 @@ import time
 import hashlib
 
 app = Flask(__name__)
-# Initialize Prometheus metrics
-metrics = PrometheusMetrics(app, defaults_prefix='my_app')
 
-# Enable CORS for all routes
 CORS(app)
 
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 client = MongoClient(uri, server_api=ServerApi('1'))
 
-dbpay = client['Payment']
-collectionpay = dbpay['accepted']
-dbrest = client['Restaurant']
-collectionrest = dbrest['payment-details']
-collectionorders = dbrest['orders']
+db = client['ChatterPy']
+collectionPayment = db['payment']
 
 
-@app.route('/metrics')
-def metrics_route():
-
-    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 razorpay_client = razorpay.Client(auth=("rzp_test_ls8UyEU66pm1Y6", "nATjdwiqiKuKDqJLxMluczid"))
-razorpay_secret = "nATjdwiqiKuKDqJLxMluczid"  # Razorpay key secret
+razorpay_secret = "nATjdwiqiKuKDqJLxMluczid"  
 
 subscription_plans = {
-    "basic": 10000,   # 10000 paise = ₹100.00
-    "standard": 20000,  # 20000 paise = ₹200.00
-    "premium": 39900   # 39900 paise = ₹399.00
+    "basic": 10000,   
+    "standard": 20000,  
+    "premium": 39900   
 }
 
-@app.route('/create-order', methods=['POST'])
+@app.route('/v1/payment/create', methods=['POST'])
 def create_order():
     try:
-        # Get data from the request (React frontend will send this)
         data = request.json
         user_email = data.get('email')
 
@@ -54,16 +41,14 @@ def create_order():
         if subscription_type not in subscription_plans:
             return jsonify({'error': 'Invalid subscription type'}), 400
 
-        # Create Razorpay order
         order_data = {
-            "amount": subscription_plans[subscription_type],  # Amount in paise
+            "amount": subscription_plans[subscription_type],  
             "currency": "INR",
             "receipt": f"receipt_{user_email}",
         }
         payment = razorpay_client.order.create(data=order_data)
 
-        # Save the order in MongoDB with status 'created'
-        collectionpay.insert_one({
+        collectionPayment.insert_one({
             "email": user_email,
             "subscription_type": subscription_type,
             "amount": subscription_plans[subscription_type],
@@ -73,13 +58,12 @@ def create_order():
             "LastDate": 0
         })
 
-        # Return the payment order details to React frontend
         return jsonify(payment)
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/verify-payment', methods=['POST'])
+@app.route('/v1/payment/verify', methods=['POST'])
 def verify_payment():
     try:
         data = request.json
@@ -87,7 +71,6 @@ def verify_payment():
         razorpay_order_id = data.get('razorpay_order_id')
         razorpay_signature = data.get('razorpay_signature')
 
-        # Verify the payment signature using HMAC SHA256
         generated_signature = hmac.new(
             bytes(razorpay_secret, 'utf-8'),
             msg=bytes(razorpay_order_id + "|" + razorpay_payment_id, 'utf-8'),
@@ -95,12 +78,10 @@ def verify_payment():
         ).hexdigest()
 
         if generated_signature == razorpay_signature:
-            # Fetch the order from MongoDB to get the subscription type
-            order = collectionpay.find_one({"payment_id": razorpay_order_id})
+            order = collectionPayment.find_one({"payment_id": razorpay_order_id})
             if order:
                 subscription_type = order.get('subscription_type')
 
-                # Calculate the LastDate based on subscription type
                 if subscription_type == 'basic':
                     last_date = datetime.now() + timedelta(days=1)
                 elif subscription_type == 'standard':
@@ -110,8 +91,7 @@ def verify_payment():
                 else:
                     return jsonify({'error': 'Invalid subscription type'}), 400
 
-                # Update the order status and set the LastDate in MongoDB
-                collectionpay.update_one(
+                collectionPayment.update_one(
                     {"payment_id": razorpay_order_id},
                     {"$set": {
                         "status": "successful",
@@ -124,7 +104,6 @@ def verify_payment():
             else:
                 return jsonify({'error': 'Order not found'}), 404
         else:
-            # Signature mismatch, payment failed
             return jsonify({'error': 'Signature verification failed'}), 400
 
     except Exception as e:

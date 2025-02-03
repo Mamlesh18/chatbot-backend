@@ -13,34 +13,29 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import google.generativeai as genai
-
+from concurrent.futures import ThreadPoolExecutor
+import pickle
+import base64
 
 app = Flask(__name__)
-# Initialize Prometheus metrics
 metrics = PrometheusMetrics(app, defaults_prefix='my_app')
-
-
-# Enable CORS for all routes
 CORS(app)
 
-index = None
-paragraphs = []
-# model = None
+
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 
+app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  
 
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 client = MongoClient(uri, server_api=ServerApi('1'))
-app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  # Replace with your own secret key
-dbpay = client['Payment']
-collectionpay = dbpay['accepted']
-dbpaid = client['Store']
-collectionpaid = dbpaid['details']
-db = client['auth']
-collection = db['authenticator']
 
-ALLOWED_EXTENSIONS = {'txt'}
+
+db = client['ChatterPy']
+collectionVector = db['knowledgebase']
+collection = db['auth']
+
+
 
 @app.route('/metrics')
 def metrics_route():
@@ -53,7 +48,7 @@ def token_required(f):
         token = request.headers.get('Authorization')
 
         if token and token.startswith('Bearer '):
-            token = token.split(' ')[1]  # Strip 'Bearer' from token
+            token = token.split(' ')[1]  
         else:
             return jsonify({'Alert!': 'Token is missing!'}), 401
 
@@ -66,10 +61,8 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
-scraped_data_dict = {}
-temporary_storage = {}
-# Step 1: Extract full links synchronously
-@app.route('/extractlinks', methods=['POST'])
+
+@app.route('/v1/knowledgebase/extract', methods=['POST'])
 @token_required
 def extract_full_links():
     data = request.json
@@ -84,19 +77,16 @@ def extract_full_links():
     
     return jsonify({"links": full_links})
 
-# Step 2: Process the selected links and store content in a dictionary
-from concurrent.futures import ThreadPoolExecutor
-@app.route('/process-links', methods=['POST'])
+
+api_urls_paid = ['http://localhost:5006/v1/knowledgebase/process']
+@app.route('/v1/knowledgebase/process', methods=['POST'])
 @token_required
 def process_links():
-    global scraped_data_dict  # Store scraped data globally for each email
 
     data = request.get_json()
     email = request.headers.get('email')
     if not email:
         return jsonify({'message': 'Email not provided'}), 400
-
-    scraped_data_dict[email] = {'paragraphs': "", 'index': None}
 
     selected_links = data.get('selected_links', [])
     crawler = WebCrawler()
@@ -108,119 +98,77 @@ def process_links():
             if result and result.markdown:
                 return result.markdown
             else:
-                return ""  # Return an empty string if result or result.markdown is None
+                return ""  
         except Exception as e:
             print(f"Error processing link {link}: {e}")
-            return ""  # Return an empty string in case of an error
+            return ""  
 
-    # Use a thread pool to process the links in parallel
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = executor.map(process_single_link, selected_links)
 
-    # Filter out any empty results
     results = [r for r in results if r]
 
-    paragraphs = "\n\n".join(results).strip()  # Combine results from all links
-    scraped_data_dict[email]['paragraphs'] = paragraphs
-
+    paragraphs = "\n\n".join(results).strip()  
     if not paragraphs:
         return jsonify({"message": "No content to index"}), 400
 
-    # Split paragraphs into a list for indexing
     paragraph_list = paragraphs.split("\n\n")
     embeddings = model.encode(paragraph_list)
     dimension = embeddings.shape[1]
 
-    # Initialize FAISS index
     index = faiss.IndexFlatL2(dimension)
     index.add(np.array(embeddings))
 
-    # Update the index in the dictionary
-    scraped_data_dict[email]['index'] = index
+    faiss_binary = pickle.dumps(index)
+    faiss_base64 = base64.b64encode(faiss_binary).decode('utf-8')
 
-    return jsonify({
-        "message": "FAISS index created",
-    })
+    existing_record = collectionVector.find_one({'email': email})
 
-@app.route('/download-scraped-data', methods=['GET'])
+    if existing_record:
+            collectionVector.update_one(
+                    {'email': email},
+                    {'$set': {
+                        'paragraphs': paragraphs,
+                        'faiss_index': faiss_base64,
+
+                    }}
+                )
+            return jsonify({'message': 'File updated and re-indexed successfully'}), 200
+    else:
+            record = {
+                    'email': email,
+                    'paragraphs': paragraphs,
+                    'faiss_index': faiss_base64,
+                    'paid':False,
+                    'api_url': 'http://localhost:5003/v1/knowledgebase/query',
+                }
+            collectionVector.insert_one(record)
+            return jsonify({'message': 'File uploaded and indexed successfully'}), 200
+
+@app.route('/v1/knowledgebase/download-scraped-data', methods=['GET'])
 def download_scraped_data():
+
     email = request.args.get('email')
     if not email:
         return jsonify({'message': 'Email not provided'}), 400
 
-    # Check if the email exists in the dictionary
-    if email not in scraped_data_dict or 'paragraphs' not in scraped_data_dict[email]:
+    document = collectionVector.find_one({'email': email})
+    if not document:
         return jsonify({"message": "No data found for this email"}), 404
 
-    # Get the scraped paragraphs for the email
-    paragraphs = scraped_data_dict[email]['paragraphs']
-    
-    # Create a temporary .txt file from the paragraphs
+    file_content = document['paragraphs']
+
     txt_file_path = os.path.join(os.getcwd(), 'scraped_data.txt')
     
-    # Use 'utf-8' encoding to avoid encoding errors
     with open(txt_file_path, 'w', encoding='utf-8') as f:
-        f.write(paragraphs)
+        f.write(file_content)
 
-    return send_file(txt_file_path, as_attachment=True)
-
-def is_user_subscribed(email):
-    # Get the user subscription from the payment collection
-    user_subscription = collectionpay.find_one({"email": email, "status": "successful"})
-    print("i came here - 1")
-    if user_subscription:
-        # Check if the subscription has expired by comparing LastDate with current time
-        last_date = user_subscription.get("LastDate", 0)  # Default to 0 if LastDate doesn't exist
-        current_time = int(time.time())  # Get current time in Unix timestamp
-        print("i came here - 2")
-        print("current",current_time)
-
-        print("last",last_date)
-
-        
-        # If the current time is greater than the LastDate, subscription has expired
-        if current_time > last_date:
-            print("i came here - 3")
-
-            return {"error": "Subscription has expired. Please re-subscribe."}, False
-        
-        # If the subscription is still valid
-        print("i came here - 4")
-
-        return None, True
-    
-    # If no successful subscription is found
-    print("i came here - 5")
-
-    return {"error": "User has no active subscription."}, False
-def check_and_increment_count(email):
-    # Check subscription status
-    error_response, is_subscribed = is_user_subscribed(email)
-    print(f"Subscription status: {is_subscribed}, Error: {error_response}")
-
-    if is_subscribed:
-        print("User is subscribed, proceed with operation.")
-        return None, True
-
-    elif not is_subscribed:
-        print("User is not subscribed, checking free trial count.")
-        user = collection.find_one({"email": email})
-        if user is None:
-            print("User not found in the database.")
-            return {"error": "User not found"}, False
-
-        count = user.get("count", 0)
-        print(f"Free trial count: {count}")
-
-        if count >= 5:
-            print("Free trial limit reached.")
-            return {"error": "Free message limit reached. Please subscribe."}, False
-
-        # Increment the count for free trial and update the user record
-        print("Incrementing free trial count.")
-        collection.update_one({"email": email}, {"$inc": {"count": 1}})
-        return None, True
-
+    return send_file(
+        txt_file_path,
+        as_attachment=True,
+        download_name=f'scraped_data_{email}.txt',  
+        mimetype='text/plain'
+    )
 
 class GeminiAI:
     def __init__(self, api_key, model_name):
@@ -235,7 +183,9 @@ class GeminiAI:
             return response.text
         except Exception as e:
             return f"Error occurred: {e}"
-@app.route('/searchgemini', methods=['POST'])
+        
+
+@app.route('/v1/knowledgebase/query', methods=['POST'])
 @token_required
 def gemini():
     data = request.get_json()
@@ -245,26 +195,23 @@ def gemini():
     if not email:
         return jsonify({"error": "Email not provided"}), 400
 
-    # Check if the email has scraped data
-    if email not in scraped_data_dict:
-        return jsonify({"error": "No scraped data found for this email"}), 404
 
-    # Retrieve the paragraphs and index for the given email
-    user_data = scraped_data_dict[email]
-    paragraphs = user_data.get('paragraphs', '')
-    index = user_data.get('index', None)
+    user_record = collectionVector.find_one({"email": email})
+    if not user_record:
+        return jsonify({"error": "User not found"}), 400
 
-    if not index:
-        return jsonify({"message": "FAISS index not created"}), 400
+    paragraphs = user_record.get('paragraphs')
+    faiss_base64 = user_record.get('faiss_index')
 
-    # Check user's message count and increment if under the limit
-    # error, success = check_and_increment_count(email)
-    # if not success:
-    #     return jsonify(error), 403    # Forbidden when limit is reached
+    if not faiss_base64:
+        return jsonify({"error": "FAISS index not found for this user"}), 400
 
-    # Proceed with the regular FAISS search and response generation
+    faiss_binary = base64.b64decode(faiss_base64)
+    faiss_index = pickle.loads(faiss_binary)
+
+
     query_embedding = model.encode([query])
-    _, indices = index.search(query_embedding, k=5)
+    _, indices = faiss_index.search(query_embedding, k=5)
 
     paragraph_list = paragraphs.split("\n\n")
     closest_match = [paragraph_list[idx] for idx in indices[0]]
@@ -275,7 +222,6 @@ def gemini():
         f"Answer the following question based on this context: {query}"
     )
 
-    # Replace this with your actual Gemini API call
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
     gemini_client = GeminiAI(api_key, model_name)
@@ -286,5 +232,34 @@ def gemini():
 
 
 
+@app.route('/v1/knowledgebase/apikey', methods=['POST'])
+def get_apikey():
+    data = request.get_json()
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    user = collection.find_one({"email": email})
+  
+    if user and "key" in user:
+        return jsonify({"key": user["key"]}), 200
+
+    return jsonify({"error": "API key not found for the user"}), 404
+
+@app.route('/v1/knowledgebase/apiurl', methods=['POST'])
+def get_apiurl():
+    data = request.get_json()
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    user = collectionVector.find_one({"email": email})
+  
+    if user and "api_url" in user:
+        return jsonify({"api_url": user["api_url"]}), 200
+
+    return jsonify({"error": "API key not found for the user"}), 404
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5001)

@@ -3,24 +3,29 @@ import random
 import string
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect, url_for, session, jsonify
 from datetime import datetime, timedelta
 from flask_cors import CORS
 import jwt
 from functools import wraps
 import random
+from flask_oauthlib.client import OAuth
+import os
 
 
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
-CORS(app)
+CORS(app, supports_credentials=True, origins=["http://localhost:3001"])
 uri = "mongodb+srv://Chatbot:developer@auth.hlrq2.mongodb.net/?retryWrites=true&w=majority&appName=auth"
 app.config['SECRET_KEY'] = 'efa8f62542204fb7a09e081699481658'  
 client = MongoClient(uri, server_api=ServerApi('1'))
 
 db = client['ChatterPy']
 collection = db['auth']
+complaints_collection = db['complain']
+
 
 def token_required(f):
     @wraps(f)
@@ -123,6 +128,87 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    
+
+oauth = OAuth(app)
+google = oauth.remote_app(
+    'google',
+    consumer_key="756748936250-2c2e4cl2j03gaipkj16ejr6rnbolsuck.apps.googleusercontent.com",
+    consumer_secret="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",
+    request_token_params={
+        'scope': 'email profile',
+    },
+    base_url='https://www.googleapis.com/oauth2/v1/',
+    request_token_url=None,
+    access_token_method='POST',
+    access_token_url='https://oauth2.googleapis.com/token',
+    authorize_url='https://accounts.google.com/o/oauth2/auth',
+)
+
+@app.route('/login/google')
+def logins():
+    return google.authorize(callback=url_for('authorized', _external=True))
+@app.route('/authorize/google')
+def authorized():
+    response = google.authorized_response()
+    if response is None or response.get('access_token') is None:
+        return jsonify({"error": "Access denied"}), 400
+
+    session['google_token'] = (response['access_token'], '')
+    user_info = google.get('userinfo').data
+
+    # Check if user already exists in the database
+    existing_user = collection.find_one({"email": user_info["email"]})
+    if not existing_user:
+        # If user does not exist, create a new document
+        document = {
+            "uuid": str(uuid.uuid4()),
+            "email": user_info["email"],
+            "name": user_info["name"],
+            "type": "Google",
+            "create_at": datetime.now()
+        }
+        collection.insert_one(document)
+    else:
+        # If user exists, update the document with Google type
+        collection.update_one({"email": user_info["email"]}, {"$set": {"type": "Google"}})
+
+    # Generate JWT token
+    token_payload = {
+        "email": user_info["email"],
+        "exp": datetime.utcnow() + timedelta(days=365)
+    }
+    token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm="HS256")
+
+    # Redirect to the React frontend with the token and email as query parameters
+    return redirect(f'http://localhost:3001/auth/callback?token={token}&email={user_info["email"]}')
+@google.tokengetter
+def get_google_oauth_token():
+    return session.get('google_token')
+
+
+@app.route('/api/contact', methods=['POST'])
+def submit_complaint():
+    data = request.json
+    name = data.get('name')
+    email = data.get('email')
+    message = data.get('message')
+
+    if not name or not email or not message:
+        return jsonify({'error': 'Missing data'}), 400
+
+    complaint = {
+        'name': name,
+        'email': email,
+        'message': message
+    }
+
+    complaints_collection.insert_one(complaint)
+    return jsonify({'message': 'Complaint submitted successfully'}), 201
+
+@app.route('/api/complains', methods=['GET'])
+def get_complaints():
+    complaints = list(complaints_collection.find({}, {'_id': 0}))
+    return jsonify(complaints), 200
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5000)

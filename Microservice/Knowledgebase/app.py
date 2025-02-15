@@ -11,11 +11,11 @@ import time
 from prometheus_flask_exporter import PrometheusMetrics
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import google.generativeai as genai
 from concurrent.futures import ThreadPoolExecutor
 import pickle
 import base64
+import random
 
 app = Flask(__name__)
 metrics = PrometheusMetrics(app, defaults_prefix='my_app')
@@ -34,13 +34,9 @@ client = MongoClient(uri, server_api=ServerApi('1'))
 db = client['ChatterPy']
 collectionVector = db['knowledgebase']
 collection = db['auth']
+collectionPayment = db['payment']
 
 
-
-@app.route('/metrics')
-def metrics_route():
-
-    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 def token_required(f):
     @wraps(f)
@@ -139,8 +135,6 @@ def process_links():
                     'email': email,
                     'paragraphs': paragraphs,
                     'faiss_index': faiss_base64,
-                    'paid':False,
-                    'api_url': 'http://localhost:5003/v1/knowledgebase/query',
                 }
             collectionVector.insert_one(record)
             return jsonify({'message': 'File uploaded and indexed successfully'}), 200
@@ -233,6 +227,7 @@ def gemini():
 
 
 @app.route('/v1/knowledgebase/apikey', methods=['POST'])
+@token_required
 def get_apikey():
     data = request.get_json()
     email = data.get("email")
@@ -248,18 +243,34 @@ def get_apikey():
     return jsonify({"error": "API key not found for the user"}), 404
 
 @app.route('/v1/knowledgebase/apiurl', methods=['POST'])
+@token_required
 def get_apiurl():
     data = request.get_json()
     email = data.get("email")
-
+    apiurls_free = ['http://localhost:5002/v1/free']
+    api_urls_paid = ['http://localhost:5002/v1/paid','http://localhost:5002/v2/paid']
     if not email:
         return jsonify({"error": "Email is required"}), 400
 
     user = collectionVector.find_one({"email": email})
   
-    if user and "api_url" in user:
-        return jsonify({"api_url": user["api_url"]}), 200
 
-    return jsonify({"error": "API key not found for the user"}), 404
+    if user and is_user_paidsubscribed(email):
+        random.shuffle(api_urls_paid) 
+        return jsonify({"api_url": random.choice(api_urls_paid)}), 200
+    else:
+        return jsonify({"api_url": apiurls_free}), 200
+
+def is_user_paidsubscribed(email):
+    user_subscription = collectionPayment.find_one({"email": email, "status": "successful"})
+    if user_subscription:
+        last_date = user_subscription.get("LastDate", 0)  
+        current_time = int(time.time()) 
+        if current_time > last_date:
+            return {"error": "Subscription has expired. Please re-subscribe."}, False
+        return None, True
+    return {"error": "User has no active subscription."}, False
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0',debug=True, port=5001)

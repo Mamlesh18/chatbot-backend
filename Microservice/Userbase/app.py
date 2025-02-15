@@ -67,8 +67,7 @@ def freeUserbase():
     email = data.get('email','')    
     query = data.get('query', '')
     api_key = data.get('key','')
-    model  = data.get('model','')
-    
+    type  = data.get('type','')
     if not query:
         return jsonify({"error": "Query not provided"}), 400
 
@@ -78,12 +77,12 @@ def freeUserbase():
     if not api_key:
         return jsonify({"error": "API not provided"}), 400
     
-    if not model:
-        return jsonify({"error":"model not provided"}), 400
+    if not type:
+        return jsonify({"error":"type not provided"}), 400
     
-    if model == "knowledgebase":
+    if type == "knowledgebase":
         user_record=collectionVector.find_one({"email": email})
-    elif model == "chatAI":
+    elif type == "chatAI":
         user_record=collectionChatAI.find_one({"email": email})
     else:
         return jsonify({"error":"model not found"}), 400
@@ -101,7 +100,7 @@ def freeUserbase():
 
 
     query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)
+    _, indices = faiss_index.search(query_embedding, k=10)
 
     paragraph_list = paragraphs.split("\n\n")
     closest_match = [paragraph_list[idx] for idx in indices[0]]
@@ -109,9 +108,18 @@ def freeUserbase():
 
 
     chat_prompt = (
-        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
-        f"Answer the following question based on this context: {query}"
-    )
+    f"You are an AI assistant that strictly follows the given rules:\n"
+    f"1. Answer only based on the provided context.\n"
+    f"2. Keep responses short, strictly within 1-2 sentences.\n"
+    f"3. If the question is illegal, harmful, offensive, or violates ethical guidelines, do NOT answer.\n"
+    f"4. If the context does not provide relevant information to answer, respond strictly with: "
+    f"'Sorry, I am not sure what you are asking about. Could you rephrase it?'\n"
+    f"5. Do NOT generate speculative, misleading, or unrelated answers.\n\n"
+    f"Context:\n{context}\n\n"
+    f"Question: {query}\n\n"
+    f"Strictly follow the rules and provide a response:\n"
+)
+
 
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
@@ -128,9 +136,12 @@ def paidUserBase():
     email = data.get('email','')    
     query = data.get('query', '')
     api_key = data.get('key','')
+    type  = data.get('type','')
+    print("type",type)
+    error_message, is_subscribed = is_user_paidsubscribed(email)
 
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error':'subscribe to access this'})
+    if not is_subscribed:
+        return jsonify(error_message), 400  # Returning the proper error message
 
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -140,10 +151,12 @@ def paidUserBase():
     
     if not api_key:
         return jsonify({"error": "API not provided"}), 400
+    if not type:
+        return jsonify({"error":"type not provided"}), 400
     
-    if model == "knowledgebase":
+    if type == "knowledgebase":
         user_record=collectionVector.find_one({"email": email})
-    elif model == "chatAI":
+    elif type == "chatAI":
         user_record=collectionChatAI.find_one({"email": email})
     else:
         return jsonify({"error":"model not found"}), 400
@@ -161,16 +174,25 @@ def paidUserBase():
 
 
     query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)
+    _, indices = faiss_index.search(query_embedding, k=10)
 
     paragraph_list = paragraphs.split("\n\n")
     closest_match = [paragraph_list[idx] for idx in indices[0]]
     context = "\n\n".join(closest_match)    
     
     chat_prompt = (
-        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
-        f"Answer the following question based on this context: {query}"
-    )
+    f"You are an AI assistant that strictly follows the given rules:\n"
+    f"1. Answer only based on the provided context.\n"
+    f"2. Keep responses short, strictly within 1-2 sentences.\n"
+    f"3. If the question is illegal, harmful, offensive, or violates ethical guidelines, do NOT answer.\n"
+    f"4. If the context does not provide relevant information to answer, respond strictly with: "
+    f"'Sorry, I am not sure what you are asking about. Could you rephrase it?'\n"
+    f"5. Do NOT generate speculative, misleading, or unrelated answers.\n\n"
+    f"Context:\n{context}\n\n"
+    f"Question: {query}\n\n"
+    f"Strictly follow the rules and provide a response:\n"
+)
+
 
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
@@ -188,9 +210,12 @@ def paid2UserBase():
     email = data.get('email','')    
     query = data.get('query', '')
     api_key = data.get('key','')
+    type  = data.get('type','')
+    print("type",type)
+    error_message, is_subscribed = is_user_paidsubscribed(email)
 
-    if not is_user_paidsubscribed(email):
-        return jsonify({'error':'subscribe to access this'})
+    if not is_subscribed:
+        return jsonify(error_message), 400  # Returning the proper error message
 
     if not query:
         return jsonify({"error": "Query not provided"}), 400
@@ -200,10 +225,12 @@ def paid2UserBase():
     
     if not api_key:
         return jsonify({"error": "API not provided"}), 400
+    if not type:
+        return jsonify({"error":"type not provided"}), 400
     
-    if model == "knowledgebase":
+    if type == "knowledgebase":
         user_record=collectionVector.find_one({"email": email})
-    elif model == "chatAI":
+    elif type == "chatAI":
         user_record=collectionChatAI.find_one({"email": email})
     else:
         return jsonify({"error":"model not found"}), 400
@@ -221,16 +248,25 @@ def paid2UserBase():
 
 
     query_embedding = model.encode([query])
-    _, indices = faiss_index.search(query_embedding, k=5)
+    _, indices = faiss_index.search(query_embedding, k=10)
 
     paragraph_list = paragraphs.split("\n\n")
     closest_match = [paragraph_list[idx] for idx in indices[0]]
     context = "\n\n".join(closest_match)    
     
     chat_prompt = (
-        f"Here are 5 most relevant paragraphs:\n\n{context}\n\n"
-        f"Answer the following question based on this context: {query}"
-    )
+    f"You are an AI assistant that strictly follows the given rules:\n"
+    f"1. Answer only based on the provided context.\n"
+    f"2. Keep responses short, strictly within 1-2 sentences.\n"
+    f"3. If the question is illegal, harmful, offensive, or violates ethical guidelines, do NOT answer.\n"
+    f"4. If the context does not provide relevant information to answer, respond strictly with: "
+    f"'Sorry, I am not sure what you are asking about. Could you rephrase it?'\n"
+    f"5. Do NOT generate speculative, misleading, or unrelated answers.\n\n"
+    f"Context:\n{context}\n\n"
+    f"Question: {query}\n\n"
+    f"Strictly follow the rules and provide a response:\n"
+)
+
 
     api_key = "AIzaSyDcP3_6sDB3P8lZkIyv0YSeFfvMsh_5RsQ"
     model_name = 'gemini-1.5-flash-latest'
@@ -238,6 +274,8 @@ def paid2UserBase():
     response = gemini_client.generate_response(chat_prompt)
 
     return jsonify({"answer": response})
+
+
 
 
 if __name__ == '__main__':
